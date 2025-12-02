@@ -7,11 +7,10 @@
     "node": ">=20.19.0"
   },
   "workspaces": [
-    "example",
+    "examples/*",
     "packages/*"
   ],
   "scripts": {
-    "example:dev": "npm --workspace @web-real-3d/example run dev",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
