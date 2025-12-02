@@ -1,5 +1,5 @@
 {
-  "name": "@examples/engine",
+  "name": "@examples/cube",
   "private": true,
   "type": "module",
   "scripts": {
@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "@web-real-3d/core": "*",
-    "@web-real-3d/math": "*"
+    "@web-real-3d/math": "*",
+    "lil-gui": "^0.19.2"
   }
 }
