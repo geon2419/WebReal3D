@@ -1,0 +1,22 @@
+{
+  "name": "@web-real-3d/core",
+  "type": "module",
+  "main": "dist/web-real-3d-core.cjs",
+  "module": "dist/web-real-3d-core.mjs",
+  "types": "dist/types/index.d.ts",
+  "files": ["dist"],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/web-real-3d-core.mjs",
+      "require": "./dist/web-real-3d-core.cjs"
+    }
+  },
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json && vite build --config vite.config.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest watch --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

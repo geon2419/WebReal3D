@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vitest/globals", "vitest/importMeta"],
+    "composite": true
+  },
+  "include": ["src", "src/**/*.test.ts"]
+}
