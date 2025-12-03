@@ -6,7 +6,7 @@ export class Scene extends Object3D {
   }
 
   /**
-   * Traverses all objects in the scene and collects renderable meshes.
+   * Traverses all objects in the scene and executes the callback for each Object3D.
    * @param callback - Function to call for each Object3D
    */
 }
