@@ -72,7 +72,8 @@ export class FrustumGeometry implements Geometry {
   }
 
   /**
-   * Updates the frustum colors.
+   * Updates the frustum colors configuration.
+   * Note: Call `update()` after this to apply the color changes to the geometry buffer.
    */
   setColors(colors: FrustumColors): void {
     if (colors.near) this._frustumColors.near = colors.near;
