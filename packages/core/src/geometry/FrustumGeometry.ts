@@ -168,7 +168,7 @@ export class FrustumGeometry implements Geometry {
 
     this._positions = new Float32Array(positions);
     this._colors = new Float32Array(colors);
-    this._vertexCount = positions.length / 3; // 40 vertices (20 lines × 2)
+    this._vertexCount = positions.length / 3; // 32 vertices (16 lines × 2)
   }
 
   /**
