@@ -2,7 +2,6 @@ import type { Geometry } from "./Geometry";
 
 /**
  * @deprecated Use VertexColorMaterial with faceColors option instead.
- * Default face colors for backward compatibility.
  */
 const DEFAULT_FACE_COLORS: [number, number, number][] = [
   [1.0, 0.3, 0.3], // Front - Red
@@ -46,19 +45,16 @@ export class BoxGeometry implements Geometry {
     this._indices = indices;
   }
 
-  /** Position data (vec3 per vertex) */
   get positions(): Float32Array {
     return this._positions;
   }
 
-  /** Normal data (vec3 per vertex) */
   get normals(): Float32Array {
     return this._normals;
   }
 
   /**
-   * @deprecated Use `positions` instead. This property will be removed in a future version.
-   * Interleaved vertex data (position + color) for backward compatibility.
+   * @deprecated Use `positions` instead.
    */
   get vertices(): Float32Array {
     return this._vertices;
