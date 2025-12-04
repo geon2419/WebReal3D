@@ -165,4 +165,65 @@ describe("Matrix4", () => {
       expect(m.data[0]).not.toBe(1);
     });
   });
+
+  describe("inverse", () => {
+    it("should return identity for identity matrix", () => {
+      const m = new Matrix4();
+      const inv = m.inverse();
+      expectMatrixClose(inv, IDENTITY);
+    });
+
+    it("should return identity for singular matrix (zero determinant)", () => {
+      const m = new Matrix4();
+      // Make a singular matrix (all zeros in a row)
+      m.data.fill(0);
+      const inv = m.inverse();
+      expectMatrixClose(inv, IDENTITY);
+    });
+
+    it("should correctly invert translation matrix", () => {
+      const t = Matrix4.translation(new Vector3(3, 5, 7));
+      const inv = t.inverse();
+      // Inverse translation should have negated values
+      expect(inv.data[12]).toBeCloseTo(-3);
+      expect(inv.data[13]).toBeCloseTo(-5);
+      expect(inv.data[14]).toBeCloseTo(-7);
+    });
+
+    it("should correctly invert scaling matrix", () => {
+      const s = Matrix4.scaling(new Vector3(2, 4, 8));
+      const inv = s.inverse();
+      expect(inv.data[0]).toBeCloseTo(0.5);
+      expect(inv.data[5]).toBeCloseTo(0.25);
+      expect(inv.data[10]).toBeCloseTo(0.125);
+    });
+
+    it("should satisfy M * M^-1 = I", () => {
+      const m = new Matrix4()
+        .translate(new Vector3(1, 2, 3))
+        .scale(new Vector3(2, 2, 2))
+        .rotateY(Math.PI / 4);
+      const inv = m.inverse();
+      const result = m.multiply(inv);
+      expectMatrixClose(result, IDENTITY);
+    });
+
+    it("should correctly invert perspective matrix", () => {
+      const p = Matrix4.perspective(Math.PI / 4, 16 / 9, 0.1, 100);
+      const inv = p.inverse();
+      const result = p.multiply(inv);
+      expectMatrixClose(result, IDENTITY);
+    });
+
+    it("should correctly invert lookAt matrix", () => {
+      const v = Matrix4.lookAt(
+        new Vector3(5, 3, 10),
+        new Vector3(0, 0, 0),
+        new Vector3(0, 1, 0)
+      );
+      const inv = v.inverse();
+      const result = v.multiply(inv);
+      expectMatrixClose(result, IDENTITY);
+    });
+  });
 });

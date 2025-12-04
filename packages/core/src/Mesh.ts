@@ -6,6 +6,8 @@ import { Object3D } from "./Object3D";
 export class Mesh extends Object3D {
   public readonly geometry: Geometry;
   public material: Material;
+  /** Set to true when geometry data changes and GPU buffers need to be updated */
+  public needsUpdate: boolean = false;
 
   constructor(geometry: Geometry, material: Material) {
     super();
@@ -35,6 +37,35 @@ export class Mesh extends Object3D {
     switch (this.material.type) {
       case "vertexColor": {
         const colors = (this.material as VertexColorMaterial).colors;
+        const data = new Float32Array(vertexCount * 6);
+
+        for (let i = 0; i < vertexCount; i++) {
+          const posOffset = i * 3;
+          const dataOffset = i * 6;
+
+          data[dataOffset] = positions[posOffset];
+          data[dataOffset + 1] = positions[posOffset + 1];
+          data[dataOffset + 2] = positions[posOffset + 2];
+
+          data[dataOffset + 3] = colors[posOffset];
+          data[dataOffset + 4] = colors[posOffset + 1];
+          data[dataOffset + 5] = colors[posOffset + 2];
+        }
+
+        return data;
+      }
+
+      case "line": {
+        // Line material only needs positions (no normals or colors)
+        return positions;
+      }
+
+      case "lineColor": {
+        // LineColor material needs positions + colors interleaved
+        const lineColorMaterial = this.material as unknown as {
+          colors: Float32Array;
+        };
+        const colors = lineColorMaterial.colors;
         const data = new Float32Array(vertexCount * 6);
 
         for (let i = 0; i < vertexCount; i++) {

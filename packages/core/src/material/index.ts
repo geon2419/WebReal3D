@@ -4,3 +4,8 @@ export {
   VertexColorMaterial,
   type VertexColorMaterialOptions,
 } from "./VertexColorMaterial";
+export { LineMaterial, type LineMaterialOptions } from "./LineMaterial";
+export {
+  LineColorMaterial,
+  type LineColorMaterialOptions,
+} from "./LineColorMaterial";

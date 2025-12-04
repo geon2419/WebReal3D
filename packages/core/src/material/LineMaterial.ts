@@ -1,15 +1,19 @@
 import type { Material, VertexBufferLayout } from "./Material";
 
-export interface BasicMaterialOptions {
+export interface LineMaterialOptions {
   color?: [number, number, number];
 }
 
-export class BasicMaterial implements Material {
-  readonly type = "basic";
+/**
+ * Material for rendering lines with a single color.
+ * Uses "line-list" primitive topology.
+ */
+export class LineMaterial implements Material {
+  readonly type = "line";
   /** RGB color (0-1 range) */
   readonly color: [number, number, number];
 
-  constructor(options: BasicMaterialOptions = {}) {
+  constructor(options: LineMaterialOptions = {}) {
     this.color = options.color ?? [1.0, 1.0, 1.0];
   }
 
@@ -24,19 +28,16 @@ struct Uniforms {
 
 struct VertexInput {
   @location(0) position: vec3f,
-  @location(1) normal: vec3f,
 }
 
 struct VertexOutput {
   @builtin(position) position: vec4f,
-  @location(0) normal: vec3f,
 }
 
 @vertex
 fn main(input: VertexInput) -> VertexOutput {
   var output: VertexOutput;
   output.position = uniforms.mvpMatrix * vec4f(input.position, 1.0);
-  output.normal = input.normal;
   return output;
 }
 `;
@@ -51,12 +52,8 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
-struct FragmentInput {
-  @location(0) normal: vec3f,
-}
-
 @fragment
-fn main(input: FragmentInput) -> @location(0) vec4f {
+fn main() -> @location(0) vec4f {
   return uniforms.color;
 }
 `;
@@ -64,18 +61,13 @@ fn main(input: FragmentInput) -> @location(0) vec4f {
 
   getVertexBufferLayout(): VertexBufferLayout {
     return {
-      // position(vec3f) + normal(vec3f) = 6 floats × 4 bytes = 24 bytes
-      arrayStride: 24,
+      // position(vec3f) = 3 floats × 4 bytes = 12 bytes
+      arrayStride: 12,
       attributes: [
         {
           shaderLocation: 0,
           offset: 0,
           format: "float32x3", // position
-        },
-        {
-          shaderLocation: 1,
-          offset: 12,
-          format: "float32x3", // normal
         },
       ],
     };
@@ -87,19 +79,6 @@ fn main(input: FragmentInput) -> @location(0) vec4f {
   }
 
   getPrimitiveTopology(): GPUPrimitiveTopology {
-    return "triangle-list";
-  }
-
-  /**
-   * Writes material-specific uniform data (color) to the buffer.
-   * MVP matrix should be written separately at offset 0.
-   * @param buffer - DataView of the uniform buffer
-   * @param offset - Byte offset to start writing (default: 64, after MVP matrix)
-   */
-  writeUniformData(buffer: DataView, offset: number = 64): void {
-    buffer.setFloat32(offset, this.color[0], true);
-    buffer.setFloat32(offset + 4, this.color[1], true);
-    buffer.setFloat32(offset + 8, this.color[2], true);
-    buffer.setFloat32(offset + 12, 1.0, true); // alpha
+    return "line-list";
   }
 }

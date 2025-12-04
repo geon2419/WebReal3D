@@ -3,6 +3,7 @@ import type { Scene } from "./Scene";
 import type { Camera } from "./camera/Camera";
 import type { Material } from "./material/Material";
 import { BasicMaterial } from "./material/BasicMaterial";
+import { LineMaterial } from "./material/LineMaterial";
 import { Mesh } from "./Mesh";
 
 interface MeshGPUResources {
@@ -72,7 +73,8 @@ export class Renderer {
    * @returns The cached or newly created render pipeline.
    */
   private getOrCreatePipeline(material: Material): GPURenderPipeline {
-    const key = material.type;
+    const topology = material.getPrimitiveTopology();
+    const key = `${material.type}_${topology}`;
     let pipeline = this.pipelineCache.get(key);
 
     if (!pipeline) {
@@ -107,7 +109,7 @@ export class Renderer {
           targets: [{ format: this.format }],
         },
         primitive: {
-          topology: "triangle-list",
+          topology,
           // Default to back-face culling
           // cullMode: "back",
           // Default to counter-clockwise front face
@@ -138,12 +140,17 @@ export class Renderer {
   ): MeshGPUResources {
     let resources = this.meshBuffers.get(mesh);
     const currentMaterialType = mesh.material.type;
-    
-    if (resources && resources.materialType !== currentMaterialType) {
+
+    // Invalidate resources if material type changed or mesh needs update
+    if (
+      resources &&
+      (resources.materialType !== currentMaterialType || mesh.needsUpdate)
+    ) {
       resources.vertexBuffer.destroy();
       resources.indexBuffer.destroy();
       resources.uniformBuffer.destroy();
       resources = undefined;
+      mesh.needsUpdate = false;
     }
 
     if (!resources) {
@@ -227,7 +234,7 @@ export class Renderer {
 
     const meshes: Mesh[] = [];
     scene.traverse((object) => {
-      if (object instanceof Mesh) {
+      if (object instanceof Mesh && object.visible) {
         meshes.push(object);
       }
     });
@@ -276,7 +283,10 @@ export class Renderer {
       );
 
       // Write material-specific data (if any)
-      if (material instanceof BasicMaterial) {
+      if (
+        material instanceof BasicMaterial ||
+        material instanceof LineMaterial
+      ) {
         const colorData = new Float32Array([
           material.color[0],
           material.color[1],
@@ -293,8 +303,14 @@ export class Renderer {
       passEncoder.setPipeline(pipeline);
       passEncoder.setBindGroup(0, resources.bindGroup);
       passEncoder.setVertexBuffer(0, resources.vertexBuffer);
-      passEncoder.setIndexBuffer(resources.indexBuffer, "uint16");
-      passEncoder.drawIndexed(mesh.indexCount);
+
+      // Use draw() for non-indexed geometry (e.g., lines), drawIndexed() otherwise
+      if (mesh.indexCount > 0) {
+        passEncoder.setIndexBuffer(resources.indexBuffer, "uint16");
+        passEncoder.drawIndexed(mesh.indexCount);
+      } else {
+        passEncoder.draw(mesh.vertexCount);
+      }
     }
 
     passEncoder.end();

@@ -13,4 +13,5 @@ export interface Material {
   getFragmentShader(): string;
   getVertexBufferLayout(): VertexBufferLayout;
   getUniformBufferSize(): number;
+  getPrimitiveTopology(): GPUPrimitiveTopology;
 }

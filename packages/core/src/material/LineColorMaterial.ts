@@ -1,46 +1,20 @@
 import type { Material, VertexBufferLayout } from "./Material";
 
-const DEFAULT_FACE_COLORS: [number, number, number][] = [
-  [1.0, 0.3, 0.3], // Front - Red
-  [0.3, 1.0, 0.3], // Back - Green
-  [0.3, 0.3, 1.0], // Top - Blue
-  [1.0, 1.0, 0.3], // Bottom - Yellow
-  [1.0, 0.3, 1.0], // Right - Magenta
-  [0.3, 1.0, 1.0], // Left - Cyan
-];
-
-export interface VertexColorMaterialOptions {
+export interface LineColorMaterialOptions {
+  /** Per-vertex colors as Float32Array (3 floats per vertex: RGB) */
   colors?: Float32Array;
-  faceColors?: [number, number, number][];
-  verticesPerFace?: number;
 }
 
-export class VertexColorMaterial implements Material {
-  readonly type = "vertexColor";
-
+/**
+ * Material for rendering lines with per-vertex colors.
+ * Uses "line-list" primitive topology.
+ */
+export class LineColorMaterial implements Material {
+  readonly type = "lineColor";
   private _colors: Float32Array;
 
-  constructor(options: VertexColorMaterialOptions = {}) {
-    if (options.colors) {
-      this._colors = options.colors;
-    } else {
-      const faceColors = options.faceColors ?? DEFAULT_FACE_COLORS;
-      const verticesPerFace = options.verticesPerFace ?? 4;
-      this._colors = this.expandFaceColors(faceColors, verticesPerFace);
-    }
-  }
-
-  private expandFaceColors(
-    faceColors: [number, number, number][],
-    verticesPerFace: number
-  ): Float32Array {
-    const colors: number[] = [];
-    for (const color of faceColors) {
-      for (let i = 0; i < verticesPerFace; i++) {
-        colors.push(...color);
-      }
-    }
-    return new Float32Array(colors);
+  constructor(options: LineColorMaterialOptions = {}) {
+    this._colors = options.colors ?? new Float32Array(0);
   }
 
   get colors(): Float32Array {
@@ -48,19 +22,7 @@ export class VertexColorMaterial implements Material {
   }
 
   /**
-   * Updates face colors and regenerates per-vertex colors.
-   * @param faceColors - Array of RGB colors for each face
-   * @param verticesPerFace - Number of vertices per face (default: 4)
-   */
-  setFaceColors(
-    faceColors: [number, number, number][],
-    verticesPerFace: number = 4
-  ): void {
-    this._colors = this.expandFaceColors(faceColors, verticesPerFace);
-  }
-
-  /**
-   * Updates per-vertex colors directly.
+   * Updates per-vertex colors.
    * @param colors - Float32Array of RGB values (3 floats per vertex)
    */
   setColors(colors: Float32Array): void {
@@ -133,6 +95,6 @@ fn main(input: FragmentInput) -> @location(0) vec4f {
   }
 
   getPrimitiveTopology(): GPUPrimitiveTopology {
-    return "triangle-list";
+    return "line-list";
   }
 }

@@ -1,17 +1,5 @@
 import type { Geometry } from "./Geometry";
 
-/**
- * @deprecated Use VertexColorMaterial with faceColors option instead.
- */
-const DEFAULT_FACE_COLORS: [number, number, number][] = [
-  [1.0, 0.3, 0.3], // Front - Red
-  [0.3, 1.0, 0.3], // Back - Green
-  [0.3, 0.3, 1.0], // Top - Blue
-  [1.0, 1.0, 0.3], // Bottom - Yellow
-  [1.0, 0.3, 1.0], // Right - Magenta
-  [0.3, 1.0, 1.0], // Left - Cyan
-];
-
 /** Normal vectors for each face */
 const FACE_NORMALS: [number, number, number][] = [
   [0, 0, 1], // Front
@@ -25,7 +13,6 @@ const FACE_NORMALS: [number, number, number][] = [
 export class BoxGeometry implements Geometry {
   private readonly _positions: Float32Array;
   private readonly _normals: Float32Array;
-  private readonly _vertices: Float32Array;
   private readonly _indices: Uint16Array;
 
   /**
@@ -38,10 +25,9 @@ export class BoxGeometry implements Geometry {
     public readonly height: number = 2,
     public readonly depth: number = 2
   ) {
-    const { positions, normals, vertices, indices } = this.generateData();
+    const { positions, normals, indices } = this.generateData();
     this._positions = positions;
     this._normals = normals;
-    this._vertices = vertices;
     this._indices = indices;
   }
 
@@ -51,13 +37,6 @@ export class BoxGeometry implements Geometry {
 
   get normals(): Float32Array {
     return this._normals;
-  }
-
-  /**
-   * @deprecated Use `positions` instead.
-   */
-  get vertices(): Float32Array {
-    return this._vertices;
   }
 
   get indices(): Uint16Array {
@@ -77,7 +56,6 @@ export class BoxGeometry implements Geometry {
   private generateData(): {
     positions: Float32Array;
     normals: Float32Array;
-    vertices: Float32Array;
     indices: Uint16Array;
   } {
     const w = this.width / 2;
@@ -128,14 +106,6 @@ export class BoxGeometry implements Geometry {
       normals.push(...FACE_NORMALS[faceIndex]);
     }
 
-    // Interleaved vertex data for backward compatibility: position(vec3) + color(vec3)
-    const vertexData: number[] = [];
-    for (let i = 0; i < 24; i++) {
-      const faceIndex = Math.floor(i / 4);
-      const color = DEFAULT_FACE_COLORS[faceIndex];
-      vertexData.push(...positionData[i], ...color);
-    }
-
     // Indices for 12 triangles (6 faces × 2 triangles)
     const indices = new Uint16Array([
       0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12,
@@ -145,7 +115,6 @@ export class BoxGeometry implements Geometry {
     return {
       positions: new Float32Array(positions),
       normals: new Float32Array(normals),
-      vertices: new Float32Array(vertexData),
       indices,
     };
   }

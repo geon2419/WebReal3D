@@ -6,6 +6,8 @@ export class Object3D {
   public readonly scale: Vector3 = new Vector3(1, 1, 1);
   public parent: Object3D | null = null;
   public readonly children: Object3D[] = [];
+  /** Whether this object is visible and should be rendered */
+  public visible: boolean = true;
   /** Local transformation matrix (TRS) */
   public readonly localMatrix: Matrix4 = new Matrix4();
   /** World transformation matrix (includes parent transforms) */
