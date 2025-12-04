@@ -4,8 +4,4 @@ export interface Geometry {
   readonly indices: Uint16Array;
   readonly vertexCount: number;
   readonly indexCount: number;
-  /**
-   * @deprecated Use `positions` instead.
-   */
-  readonly vertices?: Float32Array;
 }

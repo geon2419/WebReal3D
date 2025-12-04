@@ -63,13 +63,6 @@ export class FrustumGeometry implements Geometry {
     return this._indices;
   }
 
-  /**
-   * @deprecated Use `positions` instead.
-   */
-  get vertices(): Float32Array {
-    return this._positions;
-  }
-
   get vertexCount(): number {
     return this._vertexCount;
   }
