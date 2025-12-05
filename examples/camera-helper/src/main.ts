@@ -160,12 +160,14 @@ async function main() {
         ),
         theta: Math.atan2(params.observerX, params.observerZ),
         phi: Math.acos(
-          params.observerY /
-            Math.sqrt(
-              params.observerX ** 2 +
-                params.observerY ** 2 +
-                params.observerZ ** 2
-            )
+          Math.max(-1, Math.min(1,
+            params.observerY /
+              Math.sqrt(
+                params.observerX ** 2 +
+                  params.observerY ** 2 +
+                  params.observerZ ** 2
+              )
+          ))
         ),
       }
     );
