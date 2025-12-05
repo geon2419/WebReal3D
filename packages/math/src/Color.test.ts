@@ -67,7 +67,7 @@ describe("Color", () => {
   describe("immutability", () => {
     it("properties cannot be directly modified", () => {
       const c = new Color(1, 0, 0);
-      // @ts-expect-error - readonly 속성 테스트
+      // @ts-expect-error - readonly property test
       expect(() => (c.r = 0.5)).toThrow();
     });
   });
