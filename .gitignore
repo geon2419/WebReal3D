@@ -30,3 +30,8 @@ coverage
 
 # TypeScript
 *.tsbuildinfo
+
+# For Prompt Engineering
+PLAN.md
+AGENTS.md
+CLAUDE.md
