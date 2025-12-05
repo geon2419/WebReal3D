@@ -7,8 +7,9 @@ import {
   Scene,
   PerspectiveCamera,
   CameraFrustumHelper,
+  OrbitCameraController,
 } from "@web-real/core";
-import { Color, Vector3 } from "@web-real/math";
+import { Color } from "@web-real/math";
 import GUI from "lil-gui";
 
 interface Params {
@@ -122,8 +123,17 @@ async function main() {
       near: params.mainNear,
       far: params.mainFar,
     });
-    mainCamera.position.set(0, 0, params.mainDistance);
-    mainCamera.lookAt(new Vector3(0, 0, 0));
+
+    // Control Main camera with OrbitCameraController
+    const mainOrbitController = new OrbitCameraController(
+      mainCamera,
+      canvasMain,
+      {
+        radius: params.mainDistance,
+        theta: 0,
+        phi: Math.PI / 2, // Start from the front
+      }
+    );
 
     const cameraFrustumHelper = new CameraFrustumHelper(mainCamera, {
       nearColor: Color.GREEN,
@@ -139,12 +149,21 @@ async function main() {
       near: 0.1,
       far: 100,
     });
-    observerCamera.position.set(
-      params.observerX,
-      params.observerY,
-      params.observerZ
+
+    const radius = Math.sqrt(
+      params.observerX ** 2 + params.observerY ** 2 + params.observerZ ** 2
     );
-    observerCamera.lookAt(new Vector3(0, 0, 0));
+
+    // Use OrbitCameraController to control the Observer camera
+    const orbitController = new OrbitCameraController(
+      observerCamera,
+      canvasObserver,
+      {
+        radius,
+        theta: Math.atan2(params.observerX, params.observerZ),
+        phi: Math.acos(params.observerY / radius),
+      }
+    );
 
     // Use the first engine's run loop for timing
     engineObserver.run((deltaTime: number) => {
@@ -169,21 +188,13 @@ async function main() {
       );
       mainCubeMesh.scale.set(params.scale, params.scale, params.scale);
 
-      // Update observer camera
+      // Update observer camera (OrbitController manages position and lookAt)
       observerCamera.fov = params.observerFov;
-      observerCamera.position.set(
-        params.observerX,
-        params.observerY,
-        params.observerZ
-      );
-      observerCamera.lookAt(new Vector3(0, 0, 0));
 
-      // Update main camera
+      // Update main camera (OrbitController manages position and lookAt)
       mainCamera.fov = params.mainFov;
       mainCamera.near = params.mainNear;
       mainCamera.far = params.mainFar;
-      mainCamera.position.set(0, 0, params.mainDistance);
-      mainCamera.lookAt(new Vector3(0, 0, 0));
 
       // Update frustum helper
       cameraFrustumHelper.update();
@@ -195,6 +206,8 @@ async function main() {
     });
 
     window.addEventListener("beforeunload", () => {
+      orbitController.dispose();
+      mainOrbitController.dispose();
       observerCamera.dispose();
       mainCamera.dispose();
       gui.destroy();
