@@ -6,11 +6,11 @@ import {
   Mesh,
   Scene,
   PerspectiveCamera,
-  DirectionalLight,
-  DirectionalLightHelper,
+  PointLight,
+  PointLightHelper,
   OrbitCameraController,
 } from "@web-real/core";
-import { Color, Vector3 } from "@web-real/math";
+import { Color } from "@web-real/math";
 import GUI from "lil-gui";
 
 interface CubeParams {
@@ -27,11 +27,9 @@ interface CubeParams {
   lightPosX: number;
   lightPosY: number;
   lightPosZ: number;
-  lightDirX: number;
-  lightDirY: number;
-  lightDirZ: number;
   lightIntensity: number;
-  showLightHelper: boolean;
+  lightRange: number;
+  attenuationType: "linear" | "quadratic" | "physical";
 }
 
 async function main() {
@@ -56,11 +54,9 @@ async function main() {
       lightPosX: 3,
       lightPosY: 3,
       lightPosZ: 3,
-      lightDirX: 1,
-      lightDirY: -1,
-      lightDirZ: 0.5,
       lightIntensity: 1.0,
-      showLightHelper: true,
+      lightRange: 10,
+      attenuationType: "quadratic",
     };
 
     const gui = new GUI({ title: "Cube Controls" });
@@ -87,15 +83,15 @@ async function main() {
     const cameraFolder = gui.addFolder("Camera");
     cameraFolder.add(params, "fov", 30, 120).name("FOV");
 
-    const lightFolder = gui.addFolder("Directional Light");
-    lightFolder.add(params, "lightPosX", -5, 5).name("Position X");
-    lightFolder.add(params, "lightPosY", -5, 5).name("Position Y");
-    lightFolder.add(params, "lightPosZ", -5, 5).name("Position Z");
-    lightFolder.add(params, "lightDirX", -2, 2).name("Direction X");
-    lightFolder.add(params, "lightDirY", -2, 2).name("Direction Y");
-    lightFolder.add(params, "lightDirZ", -2, 2).name("Direction Z");
-    lightFolder.add(params, "lightIntensity", 0, 2).name("Intensity");
-    lightFolder.add(params, "showLightHelper").name("Show Helper");
+    const lightFolder = gui.addFolder("Point Light");
+    lightFolder.add(params, "lightPosX", -10, 10).name("Position X");
+    lightFolder.add(params, "lightPosY", -10, 10).name("Position Y");
+    lightFolder.add(params, "lightPosZ", -10, 10).name("Position Z");
+    lightFolder.add(params, "lightIntensity", 0, 3).name("Intensity");
+    lightFolder.add(params, "lightRange", 1, 30).name("Range");
+    lightFolder
+      .add(params, "attenuationType", ["linear", "quadratic", "physical"])
+      .name("Attenuation");
 
     const scene = new Scene();
     const geometry = new BoxGeometry(2, 2, 2);
@@ -106,20 +102,18 @@ async function main() {
     const mesh = new Mesh(geometry, material);
     scene.add(mesh);
 
-    // Add directional light
-    const light = new DirectionalLight(
-      new Vector3(params.lightDirX, params.lightDirY, params.lightDirZ),
+    // Add point light
+    const light = new PointLight(
       new Color(1, 1, 1),
-      params.lightIntensity
+      params.lightIntensity,
+      params.lightRange,
+      params.attenuationType
     );
     light.position.set(params.lightPosX, params.lightPosY, params.lightPosZ);
     scene.add(light);
 
-    // Add light helper for debugging
-    const lightHelper = new DirectionalLightHelper(light, {
-      size: 2,
-      color: Color.YELLOW,
-    });
+    // Add point light helper
+    const lightHelper = new PointLightHelper(light);
     scene.add(lightHelper);
 
     const camera = new PerspectiveCamera({
@@ -129,7 +123,6 @@ async function main() {
     });
     camera.updateAspect(canvas);
 
-    // OrbitCameraController로 카메라 제어
     const orbitController = new OrbitCameraController(camera, canvas, {
       radius: 5,
       theta: 0,
@@ -154,16 +147,12 @@ async function main() {
 
       // Update light from params
       light.position.set(params.lightPosX, params.lightPosY, params.lightPosZ);
-      light.direction = new Vector3(
-        params.lightDirX,
-        params.lightDirY,
-        params.lightDirZ
-      ).normalize();
       light.intensity = params.lightIntensity;
+      light.range = params.lightRange;
+      light.attenuationType = params.attenuationType;
 
       // Update light helper
       lightHelper.update();
-      lightHelper.visible = params.showLightHelper;
 
       // Render scene
       renderer.render(scene, camera);

@@ -4,8 +4,12 @@ import type { Scene } from "./Scene";
 import type { Camera } from "./camera/Camera";
 import type { Material } from "./material/Material";
 import { BasicMaterial } from "./material/BasicMaterial";
+import { BlinnPhongMaterial } from "./material/BlinnPhongMaterial";
 import { LineMaterial } from "./material/LineMaterial";
 import { Mesh } from "./Mesh";
+import { DirectionalLight } from "./light/DirectionalLight";
+import { PointLight } from "./light/PointLight";
+import { Light } from "./light/Light";
 
 interface MeshGPUResources {
   vertexBuffer: GPUBuffer;
@@ -292,6 +296,173 @@ export class Renderer {
           resources.uniformBuffer,
           64,
           colorData as Float32Array<ArrayBuffer>
+        );
+      } else if (material instanceof BlinnPhongMaterial) {
+        // Write model matrix at offset 64
+        this.device.queue.writeBuffer(
+          resources.uniformBuffer,
+          64,
+          mesh.worldMatrix.data as Float32Array<ArrayBuffer>
+        );
+
+        // Write normal matrix at offset 128 (inverse transpose of model matrix)
+        // This correctly transforms normals even with non-uniform scaling
+        const normalMatrix = mesh.worldMatrix.inverse().transpose();
+        this.device.queue.writeBuffer(
+          resources.uniformBuffer,
+          128,
+          normalMatrix.data as Float32Array<ArrayBuffer>
+        );
+
+        // Write colorAndShininess at offset 192 (rgb = color, a = shininess)
+        const colorAndShininessData = new Float32Array([
+          material.color.r,
+          material.color.g,
+          material.color.b,
+          material.shininess,
+        ]);
+        this.device.queue.writeBuffer(
+          resources.uniformBuffer,
+          192,
+          colorAndShininessData as Float32Array<ArrayBuffer>
+        );
+
+        // Write light data: offset 208 (lightPosition), 224 (lightColor), 256 (lightParams), 272 (lightTypes)
+        let light: Light | undefined;
+        scene.traverse((obj) => {
+          if (
+            (obj instanceof DirectionalLight || obj instanceof PointLight) &&
+            !light
+          ) {
+            light = obj;
+          }
+        });
+
+        if (light) {
+          if (light instanceof DirectionalLight) {
+            // Directional light: xyz = direction
+            const lightPositionData = new Float32Array([
+              light.direction.x,
+              light.direction.y,
+              light.direction.z,
+              0,
+            ]);
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              208,
+              lightPositionData as Float32Array<ArrayBuffer>
+            );
+
+            // Light params: not used for directional light
+            const lightParamsData = new Float32Array([0, 0, 0, 0]);
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              256,
+              lightParamsData as Float32Array<ArrayBuffer>
+            );
+
+            // Light types: x = 0 (directional), y = 0 (unused)
+            const lightTypesData = new Float32Array([0, 0, 0, 0]);
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              272,
+              lightTypesData as Float32Array<ArrayBuffer>
+            );
+          } else if (light instanceof PointLight) {
+            // Point light: xyz = world position
+            light.updateWorldMatrix(true, false);
+            const lightPositionData = new Float32Array([
+              light.worldMatrix.data[12],
+              light.worldMatrix.data[13],
+              light.worldMatrix.data[14],
+              0,
+            ]);
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              208,
+              lightPositionData as Float32Array<ArrayBuffer>
+            );
+
+            // Light params: x = range, y = attenuation param
+            const attenuationFactors = light.getAttenuationFactors();
+            const lightParamsData = new Float32Array([
+              attenuationFactors[0], // range
+              attenuationFactors[1], // param
+              0,
+              0,
+            ]);
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              256,
+              lightParamsData as Float32Array<ArrayBuffer>
+            );
+
+            // Light types: x = 1 (point), y = attenuation type
+            const lightTypesData = new Float32Array([
+              1, // light type: point
+              attenuationFactors[3], // attenuation type
+              0,
+              0,
+            ]);
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              272,
+              lightTypesData as Float32Array<ArrayBuffer>
+            );
+          }
+
+          // Light color (common for all light types)
+          const lightColorData = new Float32Array([
+            light.color.r,
+            light.color.g,
+            light.color.b,
+            light.intensity,
+          ]);
+          this.device.queue.writeBuffer(
+            resources.uniformBuffer,
+            224,
+            lightColorData as Float32Array<ArrayBuffer>
+          );
+        } else {
+          // Default light if none in scene (directional from above)
+          const defaultLightPosition = new Float32Array([0, -1, 0, 0]);
+          const defaultLightColor = new Float32Array([1, 1, 1, 1]);
+          const defaultLightParams = new Float32Array([0, 0, 0, 0]);
+          const defaultLightTypes = new Float32Array([0, 0, 0, 0]); // directional
+          this.device.queue.writeBuffer(
+            resources.uniformBuffer,
+            208,
+            defaultLightPosition as Float32Array<ArrayBuffer>
+          );
+          this.device.queue.writeBuffer(
+            resources.uniformBuffer,
+            224,
+            defaultLightColor as Float32Array<ArrayBuffer>
+          );
+          this.device.queue.writeBuffer(
+            resources.uniformBuffer,
+            256,
+            defaultLightParams as Float32Array<ArrayBuffer>
+          );
+          this.device.queue.writeBuffer(
+            resources.uniformBuffer,
+            272,
+            defaultLightTypes as Float32Array<ArrayBuffer>
+          );
+        }
+
+        // Write camera position at offset 240
+        const cameraWorldMatrix = camera.worldMatrix.data;
+        const cameraPosData = new Float32Array([
+          cameraWorldMatrix[12],
+          cameraWorldMatrix[13],
+          cameraWorldMatrix[14],
+          0,
+        ]);
+        this.device.queue.writeBuffer(
+          resources.uniformBuffer,
+          240,
+          cameraPosData as Float32Array<ArrayBuffer>
         );
       }
 

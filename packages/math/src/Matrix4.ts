@@ -75,6 +75,36 @@ export class Matrix4 {
   }
 
   /**
+   * Computes the transpose of this matrix.
+   * Swaps rows and columns.
+   * @returns A new Matrix4 that is the transpose of this matrix.
+   */
+  transpose(): Matrix4 {
+    const m = this._data;
+    const result = new Matrix4();
+    const out = result._data;
+
+    out[0] = m[0];
+    out[1] = m[4];
+    out[2] = m[8];
+    out[3] = m[12];
+    out[4] = m[1];
+    out[5] = m[5];
+    out[6] = m[9];
+    out[7] = m[13];
+    out[8] = m[2];
+    out[9] = m[6];
+    out[10] = m[10];
+    out[11] = m[14];
+    out[12] = m[3];
+    out[13] = m[7];
+    out[14] = m[11];
+    out[15] = m[15];
+
+    return result;
+  }
+
+  /**
    * Computes the inverse of this matrix.
    * Uses cofactor expansion method for 4x4 matrix inversion.
    * @returns A new Matrix4 that is the inverse of this matrix.

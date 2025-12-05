@@ -226,4 +226,53 @@ describe("Matrix4", () => {
       expectMatrixClose(result, IDENTITY);
     });
   });
+
+  describe("transpose", () => {
+    it("should return identity for identity matrix", () => {
+      const m = new Matrix4();
+      const t = m.transpose();
+      expectMatrixClose(t, IDENTITY);
+    });
+
+    it("should swap rows and columns", () => {
+      const m = Matrix4.translation(new Vector3(1, 2, 3));
+      const t = m.transpose();
+      // Original: translation is at column 3 (indices 12, 13, 14)
+      // Transposed: should be at row 3 (indices 3, 7, 11)
+      expect(t.data[3]).toBeCloseTo(1);
+      expect(t.data[7]).toBeCloseTo(2);
+      expect(t.data[11]).toBeCloseTo(3);
+      // Original positions should now be 0
+      expect(t.data[12]).toBeCloseTo(0);
+      expect(t.data[13]).toBeCloseTo(0);
+      expect(t.data[14]).toBeCloseTo(0);
+    });
+
+    it("should satisfy (M^T)^T = M", () => {
+      const m = new Matrix4()
+        .translate(new Vector3(1, 2, 3))
+        .scale(new Vector3(2, 3, 4))
+        .rotateY(Math.PI / 4);
+      const tt = m.transpose().transpose();
+      expectMatrixClose(tt, Array.from(m.data));
+    });
+
+    it("should satisfy (A*B)^T = B^T * A^T", () => {
+      const a = Matrix4.translation(new Vector3(1, 2, 3));
+      const b = Matrix4.scaling(new Vector3(2, 3, 4));
+      const abT = a.multiply(b).transpose();
+      const bTaT = b.transpose().multiply(a.transpose());
+      expectMatrixClose(abT, Array.from(bTaT.data));
+    });
+
+    it("should create correct normal matrix with inverse transpose", () => {
+      // For non-uniform scaling, normals need inverse transpose
+      const s = Matrix4.scaling(new Vector3(2, 1, 1)); // non-uniform scale
+      const normalMatrix = s.inverse().transpose();
+      // For scaling (2,1,1), inverse is (0.5,1,1), transpose of diagonal is same
+      expect(normalMatrix.data[0]).toBeCloseTo(0.5);
+      expect(normalMatrix.data[5]).toBeCloseTo(1);
+      expect(normalMatrix.data[10]).toBeCloseTo(1);
+    });
+  });
 });
