@@ -7,3 +7,7 @@ export {
   CameraFrustumHelper,
   type CameraFrustumHelperOptions,
 } from "./CameraFrustumHelper";
+export {
+  OrbitCameraController,
+  type OrbitCameraControllerOptions,
+} from "./OrbitCameraController";
