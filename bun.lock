@@ -59,6 +59,16 @@
         "lil-gui": "^0.21.0",
       },
     },
+    "examples/raycaster": {
+      "name": "@examples/raycaster",
+      "dependencies": {
+        "@web-real/core": "workspace:*",
+        "@web-real/math": "workspace:*",
+      },
+      "devDependencies": {
+        "vite": "^7.2.6",
+      },
+    },
     "packages/core": {
       "name": "@web-real/core",
       "dependencies": {
@@ -133,6 +143,8 @@
     "@examples/plane": ["@examples/plane@workspace:examples/plane"],
 
     "@examples/point-light": ["@examples/point-light@workspace:examples/point-light"],
+
+    "@examples/raycaster": ["@examples/raycaster@workspace:examples/raycaster"],
 
     "@rollup/rollup-android-arm-eabi": ["@rollup/rollup-android-arm-eabi@4.53.3", "", { "os": "android", "cpu": "arm" }, "sha512-mRSi+4cBjrRLoaal2PnqH82Wqyb+d3HsPUN/W+WslCXsZsyHa9ZeQQX/pQsZaVIWDkPcpV6jJ+3KLbTbgnwv8w=="],
 
