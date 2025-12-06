@@ -18,22 +18,35 @@ export interface ShaderMaterialOptions {
   primitiveTopology?: GPUPrimitiveTopology;
   /**
    * Optional callback to write custom uniform data to the buffer.
-   * This callback is invoked before any GPU writes occur. The MVP matrix is written separately by the Renderer at offset 0 of the GPU buffer.
-   * The callback receives a DataView of a local uniform buffer to prepare data that will be written to the GPU buffer starting at the specified offset.
-   * @param buffer - DataView of a local uniform buffer for preparing data
-   * @param offset - Byte offset where this data will be written in the GPU buffer (default: 64, after MVP matrix)
+   * The MVP matrix is written separately by the Renderer at offset 0.
+   * @param buffer - DataView of the uniform buffer
+   * @param offset - Byte offset to start writing (default: 64, after MVP matrix)
    */
-  writeUniformData?: (buffer: DataView, offset: number) => void;
+  writeUniformData?: (buffer: DataView, offset?: number) => void;
 }
 
-let shaderMaterialCounter = 0;
+/**
+ * Generates a simple hash from shader code for type identification.
+ * This ensures that materials with identical shaders share the same type,
+ * enabling pipeline caching while being safe across HMR.
+ */
+function hashShaderCode(vertex: string, fragment: string): string {
+  const combined = vertex + fragment;
+  let hash = 0;
+  for (let i = 0; i < combined.length; i++) {
+    const char = combined.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
 
 /**
  * Material that allows custom WGSL shaders to be provided directly.
  *
  * The Renderer automatically handles:
  * - MVP matrix writing at offset 0 (64 bytes)
- * - Pipeline caching based on auto-generated unique type
+ * - Pipeline caching based on shader code hash (materials with identical shaders share pipelines)
  *
  * User responsibilities:
  * - Provide valid WGSL shaders with correct entry points
@@ -68,10 +81,10 @@ let shaderMaterialCounter = 0;
  *     }
  *   `,
  *   uniformBufferSize: 80, // MVP (64) + color (16)
- *   writeUniformData: (buffer, offset) => {
- *     buffer.setFloat32(offset, 1.0, true);     // r
- *     buffer.setFloat32(offset + 4, 0.0, true); // g
- *     buffer.setFloat32(offset + 8, 0.0, true); // b
+ *   writeUniformData: (buffer, offset = 64) => {
+ *     buffer.setFloat32(offset, 1.0, true);      // r
+ *     buffer.setFloat32(offset + 4, 0.0, true);  // g
+ *     buffer.setFloat32(offset + 8, 0.0, true);  // b
  *     buffer.setFloat32(offset + 12, 1.0, true); // a
  *   }
  * });
@@ -85,11 +98,17 @@ export class ShaderMaterial implements Material {
   private _vertexBufferLayout: VertexBufferLayout;
   private _uniformBufferSize: number;
   private _primitiveTopology: GPUPrimitiveTopology;
-
-  writeUniformData?: (buffer: DataView, offset: number) => void;
+  private _writeUniformDataCallback?: (
+    buffer: DataView,
+    offset?: number
+  ) => void;
+  private _uniformDataBuffer: ArrayBuffer;
 
   constructor(options: ShaderMaterialOptions) {
-    this.type = `shader_${shaderMaterialCounter++}`;
+    // Generate type based on shader code hash for consistent pipeline caching
+    // Same shader code = same type = shared pipeline (even across HMR)
+    const hash = hashShaderCode(options.vertexShader, options.fragmentShader);
+    this.type = `shader_${hash}`;
 
     this._vertexShader = options.vertexShader;
     this._fragmentShader = options.fragmentShader;
@@ -119,8 +138,10 @@ export class ShaderMaterial implements Material {
     }
 
     this._primitiveTopology = options.primitiveTopology ?? "triangle-list";
+    this._writeUniformDataCallback = options.writeUniformData;
 
-    this.writeUniformData = options.writeUniformData;
+    // Pre-allocate uniform buffer to reduce GC pressure during rendering
+    this._uniformDataBuffer = new ArrayBuffer(this._uniformBufferSize);
   }
 
   getVertexShader(): string {
@@ -141,5 +162,25 @@ export class ShaderMaterial implements Material {
 
   getPrimitiveTopology(): GPUPrimitiveTopology {
     return this._primitiveTopology;
+  }
+
+  /**
+   * Gets the pre-allocated uniform data buffer.
+   * This buffer is reused across frames to reduce GC pressure.
+   * @returns The ArrayBuffer for uniform data
+   */
+  getUniformDataBuffer(): ArrayBuffer {
+    return this._uniformDataBuffer;
+  }
+
+  /**
+   * Writes custom uniform data to the buffer using the user-provided callback.
+   * @param buffer - DataView of the uniform buffer
+   * @param offset - Byte offset to start writing (default: 64, after MVP matrix)
+   */
+  writeUniformData(buffer: DataView, offset: number = 64): void {
+    if (this._writeUniformDataCallback) {
+      this._writeUniformDataCallback(buffer, offset);
+    }
   }
 }
