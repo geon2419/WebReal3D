@@ -89,7 +89,7 @@ export class FrustumGeometry implements Geometry {
 
   /**
    * Updates the frustum geometry based on camera parameters.
-   * Call this when camera fov, aspect, near, or far changes.
+   * Call this when camera projection parameters change.
    */
   update(camera: Camera): void {
     // Get the inverse of projection * view matrix
