@@ -475,13 +475,16 @@ export class Renderer {
           material.writeUniformData(dataView, 64);
 
           // Write the custom uniform data to GPU (starting at offset 64, after MVP)
-          this.device.queue.writeBuffer(
-            resources.uniformBuffer,
-            64,
-            uniformData,
-            64, // source offset
-            material.getUniformBufferSize() - 64 // size to copy
-          );
+          const customDataSize = material.getUniformBufferSize() - 64;
+          if (customDataSize > 0) {
+            this.device.queue.writeBuffer(
+              resources.uniformBuffer,
+              64,
+              uniformData,
+              64, // source offset
+              customDataSize // size to copy
+            );
+          }
         }
       }
 
