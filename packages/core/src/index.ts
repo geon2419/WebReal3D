@@ -41,3 +41,5 @@ export {
   PerspectiveCameraHelper,
   type PerspectiveCameraHelperOptions,
 } from "./camera/PerspectiveCameraHelper";
+export { Ray, type RayTriangleIntersection } from "./Ray";
+export { Raycaster, type Intersection } from "./Raycaster";

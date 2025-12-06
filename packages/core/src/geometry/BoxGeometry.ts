@@ -1,34 +1,34 @@
 import type { Geometry } from "./Geometry";
 
-/** Normal vectors for each face */
-const FACE_NORMALS: [number, number, number][] = [
-  [0, 0, 1], // Front
-  [0, 0, -1], // Back
-  [0, 1, 0], // Top
-  [0, -1, 0], // Bottom
-  [1, 0, 0], // Right
-  [-1, 0, 0], // Left
-];
-
 export class BoxGeometry implements Geometry {
   private readonly _positions: Float32Array;
   private readonly _normals: Float32Array;
   private readonly _indices: Uint16Array;
+  private readonly _vertexCount: number;
+  private readonly _indexCount: number;
 
   /**
-   * @param width
-   * @param height
-   * @param depth
+   * @param width Width of the box
+   * @param height Height of the box
+   * @param depth Depth of the box
+   * @param widthSegments Number of segments along the width (default: 1)
+   * @param heightSegments Number of segments along the height (default: 1)
+   * @param depthSegments Number of segments along the depth (default: 1)
    */
   constructor(
     public readonly width: number = 2,
     public readonly height: number = 2,
-    public readonly depth: number = 2
+    public readonly depth: number = 2,
+    public readonly widthSegments: number = 1,
+    public readonly heightSegments: number = 1,
+    public readonly depthSegments: number = 1
   ) {
     const { positions, normals, indices } = this.generateData();
     this._positions = positions;
     this._normals = normals;
     this._indices = indices;
+    this._vertexCount = positions.length / 3;
+    this._indexCount = indices.length;
   }
 
   get positions(): Float32Array {
@@ -44,13 +44,71 @@ export class BoxGeometry implements Geometry {
   }
 
   get vertexCount(): number {
-    // 6 faces × 4 vertices
-    return 24;
+    return this._vertexCount;
   }
 
   get indexCount(): number {
-    // 6 faces × 2 triangles × 3 vertices
-    return 36;
+    return this._indexCount;
+  }
+
+  private buildPlane(
+    u: string,
+    v: string,
+    w: string,
+    udir: number,
+    vdir: number,
+    width: number,
+    height: number,
+    depth: number,
+    gridX: number,
+    gridY: number,
+    positions: number[],
+    normals: number[],
+    indices: number[]
+  ): void {
+    const segmentWidth = width / gridX;
+    const segmentHeight = height / gridY;
+    const widthHalf = width / 2;
+    const heightHalf = height / 2;
+    const depthHalf = depth / 2;
+    const gridX1 = gridX + 1;
+    const gridY1 = gridY + 1;
+    let vertexCounter = positions.length / 3;
+
+    // Generate vertices
+    for (let iy = 0; iy < gridY1; iy++) {
+      const y = iy * segmentHeight - heightHalf;
+      for (let ix = 0; ix < gridX1; ix++) {
+        const x = ix * segmentWidth - widthHalf;
+        const vertex: Record<string, number> = {};
+        vertex[u] = x * udir;
+        vertex[v] = y * vdir;
+        vertex[w] = depthHalf;
+
+        positions.push(vertex["x"] || 0, vertex["y"] || 0, vertex["z"] || 0);
+
+        const normal: Record<string, number> = {};
+        normal[u] = 0;
+        normal[v] = 0;
+        normal[w] = depth > 0 ? 1 : -1;
+
+        normals.push(normal["x"] || 0, normal["y"] || 0, normal["z"] || 0);
+      }
+    }
+
+    // Generate indices
+    for (let iy = 0; iy < gridY; iy++) {
+      for (let ix = 0; ix < gridX; ix++) {
+        const a = vertexCounter + ix + gridX1 * iy;
+        const b = vertexCounter + ix + gridX1 * (iy + 1);
+        const c = vertexCounter + (ix + 1) + gridX1 * (iy + 1);
+        const d = vertexCounter + (ix + 1) + gridX1 * iy;
+
+        // Two triangles per quad
+        indices.push(a, b, d);
+        indices.push(b, c, d);
+      }
+    }
   }
 
   private generateData(): {
@@ -58,64 +116,106 @@ export class BoxGeometry implements Geometry {
     normals: Float32Array;
     indices: Uint16Array;
   } {
-    const w = this.width / 2;
-    const h = this.height / 2;
-    const d = this.depth / 2;
-
-    // 24 vertices: 6 faces × 4 vertices
-    const positionData: [number, number, number][] = [
-      // Front face
-      [-w, -h, d],
-      [w, -h, d],
-      [w, h, d],
-      [-w, h, d],
-      // Back face
-      [w, -h, -d],
-      [-w, -h, -d],
-      [-w, h, -d],
-      [w, h, -d],
-      // Top face
-      [-w, h, d],
-      [w, h, d],
-      [w, h, -d],
-      [-w, h, -d],
-      // Bottom face
-      [-w, -h, -d],
-      [w, -h, -d],
-      [w, -h, d],
-      [-w, -h, d],
-      // Right face
-      [w, -h, d],
-      [w, -h, -d],
-      [w, h, -d],
-      [w, h, d],
-      // Left face
-      [-w, -h, -d],
-      [-w, -h, d],
-      [-w, h, d],
-      [-w, h, -d],
-    ];
-
-    // Generate separate position and normal arrays
     const positions: number[] = [];
     const normals: number[] = [];
+    const indices: number[] = [];
 
-    for (let i = 0; i < 24; i++) {
-      const faceIndex = Math.floor(i / 4);
-      positions.push(...positionData[i]);
-      normals.push(...FACE_NORMALS[faceIndex]);
-    }
-
-    // Indices for 12 triangles (6 faces × 2 triangles)
-    const indices = new Uint16Array([
-      0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12,
-      14, 15, 16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
-    ]);
+    // Build all six faces
+    this.buildPlane(
+      "z",
+      "y",
+      "x",
+      -1,
+      -1,
+      this.depth,
+      this.height,
+      this.width,
+      this.depthSegments,
+      this.heightSegments,
+      positions,
+      normals,
+      indices
+    ); // px
+    this.buildPlane(
+      "z",
+      "y",
+      "x",
+      1,
+      -1,
+      this.depth,
+      this.height,
+      -this.width,
+      this.depthSegments,
+      this.heightSegments,
+      positions,
+      normals,
+      indices
+    ); // nx
+    this.buildPlane(
+      "x",
+      "z",
+      "y",
+      1,
+      1,
+      this.width,
+      this.depth,
+      this.height,
+      this.widthSegments,
+      this.depthSegments,
+      positions,
+      normals,
+      indices
+    ); // py
+    this.buildPlane(
+      "x",
+      "z",
+      "y",
+      1,
+      -1,
+      this.width,
+      this.depth,
+      -this.height,
+      this.widthSegments,
+      this.depthSegments,
+      positions,
+      normals,
+      indices
+    ); // ny
+    this.buildPlane(
+      "x",
+      "y",
+      "z",
+      1,
+      -1,
+      this.width,
+      this.height,
+      this.depth,
+      this.widthSegments,
+      this.heightSegments,
+      positions,
+      normals,
+      indices
+    ); // pz
+    this.buildPlane(
+      "x",
+      "y",
+      "z",
+      -1,
+      -1,
+      this.width,
+      this.height,
+      -this.depth,
+      this.widthSegments,
+      this.heightSegments,
+      positions,
+      normals,
+      indices
+    ); // nz
 
     return {
       positions: new Float32Array(positions),
       normals: new Float32Array(normals),
-      indices,
+      indices: new Uint16Array(indices),
     };
   }
 }

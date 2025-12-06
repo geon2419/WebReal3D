@@ -24,8 +24,10 @@ interface MeshGPUResources {
 export class Renderer {
   private engine: Engine;
   private depthTexture!: GPUTexture;
+  private msaaTexture!: GPUTexture;
   private clearColor: Color = new Color(0.1, 0.1, 0.1, 1.0);
   private resizeObserver: ResizeObserver;
+  private sampleCount: number = 4; // 4x MSAA
 
   private pipelineCache: Map<string, GPURenderPipeline> = new Map();
   private meshBuffers: WeakMap<Mesh, MeshGPUResources> = new WeakMap();
@@ -38,9 +40,11 @@ export class Renderer {
   constructor(engine: Engine) {
     this.engine = engine;
     this.createDepthTexture();
+    this.createMSAATexture();
 
     this.resizeObserver = new ResizeObserver(() => {
       this.createDepthTexture();
+      this.createMSAATexture();
     });
     this.resizeObserver.observe(this.engine.canvas);
   }
@@ -67,6 +71,21 @@ export class Renderer {
       size: [canvas.width, canvas.height],
       format: "depth24plus",
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      sampleCount: this.sampleCount,
+    });
+  }
+
+  private createMSAATexture(): void {
+    if (this.msaaTexture) {
+      this.msaaTexture.destroy();
+    }
+
+    const canvas = this.engine.canvas;
+    this.msaaTexture = this.device.createTexture({
+      size: [canvas.width, canvas.height],
+      format: this.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      sampleCount: this.sampleCount,
     });
   }
 
@@ -122,6 +141,9 @@ export class Renderer {
           depthWriteEnabled: true,
           depthCompare: "less",
           format: "depth24plus",
+        },
+        multisample: {
+          count: this.sampleCount,
         },
       });
 
@@ -247,7 +269,8 @@ export class Renderer {
     const renderPassDescriptor: GPURenderPassDescriptor = {
       colorAttachments: [
         {
-          view: textureView,
+          view: this.msaaTexture.createView(),
+          resolveTarget: textureView,
           clearValue: {
             r: this.clearColor.r,
             g: this.clearColor.g,
@@ -504,6 +527,10 @@ export class Renderer {
 
     if (this.depthTexture) {
       this.depthTexture.destroy();
+    }
+
+    if (this.msaaTexture) {
+      this.msaaTexture.destroy();
     }
 
     for (const mesh of this.trackedMeshes) {
