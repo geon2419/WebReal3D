@@ -24,6 +24,9 @@ bun run build:all
 cd examples/*
 bun install
 bun run dev
+
+# Test
+bun test
 ```
 
 ## Build Commands
