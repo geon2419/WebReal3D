@@ -355,4 +355,49 @@ export class Matrix4 {
 
     return m;
   }
+
+  /**
+   * Transforms a point by this matrix (applies full transformation including translation).
+   * Performs perspective division by w component.
+   * @param v - The point to transform
+   * @returns A new Vector3 representing the transformed point
+   */
+  transformPoint(v: Vector3): Vector3 {
+    const m = this._data;
+    const x = v.x;
+    const y = v.y;
+    const z = v.z;
+
+    const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+
+    const outX = m[0] * x + m[4] * y + m[8] * z + m[12];
+    const outY = m[1] * x + m[5] * y + m[9] * z + m[13];
+    const outZ = m[2] * x + m[6] * y + m[10] * z + m[14];
+
+    // Perspective division
+    if (Math.abs(w) > 1e-10) {
+      return new Vector3(outX / w, outY / w, outZ / w);
+    }
+
+    return new Vector3(outX, outY, outZ);
+  }
+
+  /**
+   * Transforms a direction vector by this matrix (ignores translation).
+   * Useful for transforming normals, rays, or any directional vectors.
+   * @param v - The direction vector to transform
+   * @returns A new Vector3 representing the transformed direction
+   */
+  transformDirection(v: Vector3): Vector3 {
+    const m = this._data;
+    const x = v.x;
+    const y = v.y;
+    const z = v.z;
+
+    const outX = m[0] * x + m[4] * y + m[8] * z;
+    const outY = m[1] * x + m[5] * y + m[9] * z;
+    const outZ = m[2] * x + m[6] * y + m[10] * z;
+
+    return new Vector3(outX, outY, outZ);
+  }
 }
