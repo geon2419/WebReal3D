@@ -18,9 +18,10 @@ export interface ShaderMaterialOptions {
   primitiveTopology?: GPUPrimitiveTopology;
   /**
    * Optional callback to write custom uniform data to the buffer.
-   * Called after the Renderer writes the MVP matrix at offset 0.
-   * @param buffer - DataView of the uniform buffer
-   * @param offset - Byte offset to start writing (default: 64, after MVP matrix)
+   * This callback is invoked before any GPU writes occur. The MVP matrix is written separately by the Renderer at offset 0 of the GPU buffer.
+   * The callback receives a DataView of a local uniform buffer to prepare data that will be written to the GPU buffer starting at the specified offset.
+   * @param buffer - DataView of a local uniform buffer for preparing data
+   * @param offset - Byte offset where this data will be written in the GPU buffer (default: 64, after MVP matrix)
    */
   writeUniformData?: (buffer: DataView, offset: number) => void;
 }
