@@ -210,15 +210,35 @@ export class Renderer {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
+      // Create bind group entries based on material type
+      const bindGroupEntries: GPUBindGroupEntry[] = [
+        {
+          binding: 0,
+          resource: { buffer: uniformBuffer },
+        },
+      ];
+
+      // Add texture and sampler for TextureMaterial
+      if (mesh.material.type === "texture") {
+        const textureMaterial = mesh.material as any; // TextureMaterial
+        const texture = textureMaterial.getTexture();
+
+        bindGroupEntries.push(
+          {
+            binding: 1,
+            resource: texture.gpuSampler,
+          },
+          {
+            binding: 2,
+            resource: texture.gpuTexture.createView(),
+          }
+        );
+      }
+
       const bindGroup = this.device.createBindGroup({
         label: "Mesh Bind Group",
         layout: pipeline.getBindGroupLayout(0),
-        entries: [
-          {
-            binding: 0,
-            resource: { buffer: uniformBuffer },
-          },
-        ],
+        entries: bindGroupEntries,
       });
 
       resources = {

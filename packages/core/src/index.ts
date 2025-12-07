@@ -17,11 +17,13 @@ export {
   type VertexColorMaterialOptions,
   type LineMaterialOptions,
   type LineColorMaterialOptions,
+  type TextureMaterialOptions,
   BasicMaterial,
   BlinnPhongMaterial,
   VertexColorMaterial,
   LineMaterial,
   LineColorMaterial,
+  TextureMaterial,
 } from "./material";
 export { ShaderLib, type ShaderSource } from "./shaders";
 export * from "./camera";
@@ -43,3 +45,4 @@ export {
 } from "./camera/PerspectiveCameraHelper";
 export { Ray, type RayTriangleIntersection } from "./Ray";
 export { Raycaster, type Intersection } from "./Raycaster";
+export { Texture } from "./Texture";

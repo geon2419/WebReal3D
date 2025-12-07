@@ -31,10 +31,42 @@ export class Mesh extends Object3D {
    * Returns interleaved vertex data based on the material type.
    */
   getInterleavedVertices(): Float32Array {
-    const { positions, normals } = this.geometry;
+    const { positions, normals, uvs } = this.geometry;
     const vertexCount = this.geometry.vertexCount;
 
     switch (this.material.type) {
+      case "texture": {
+        // Texture material needs positions + normals + UVs
+        if (!uvs) {
+          throw new Error(
+            "TextureMaterial requires geometry with UV coordinates"
+          );
+        }
+        const data = new Float32Array(vertexCount * 8); // 3 + 3 + 2 = 8
+
+        for (let i = 0; i < vertexCount; i++) {
+          const posOffset = i * 3;
+          const uvOffset = i * 2;
+          const dataOffset = i * 8;
+
+          // position
+          data[dataOffset] = positions[posOffset];
+          data[dataOffset + 1] = positions[posOffset + 1];
+          data[dataOffset + 2] = positions[posOffset + 2];
+
+          // normal
+          data[dataOffset + 3] = normals[posOffset];
+          data[dataOffset + 4] = normals[posOffset + 1];
+          data[dataOffset + 5] = normals[posOffset + 2];
+
+          // uv
+          data[dataOffset + 6] = uvs[uvOffset];
+          data[dataOffset + 7] = uvs[uvOffset + 1];
+        }
+
+        return data;
+      }
+
       case "vertexColor": {
         const colors = (this.material as VertexColorMaterial).colors;
         const data = new Float32Array(vertexCount * 6);

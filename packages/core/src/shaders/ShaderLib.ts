@@ -18,6 +18,10 @@ import lineFrag from "./line/line.frag.wgsl";
 import lineColorVert from "./lineColor/lineColor.vert.wgsl";
 import lineColorFrag from "./lineColor/lineColor.frag.wgsl";
 
+// Texture shader
+import textureVert from "./texture/texture.vert.wgsl";
+import textureFrag from "./texture/texture.frag.wgsl";
+
 export interface ShaderSource {
   vertex: string;
   fragment: string;
@@ -43,6 +47,10 @@ const shaders: Record<string, ShaderSource> = {
   lineColor: {
     vertex: lineColorVert,
     fragment: lineColorFrag,
+  },
+  texture: {
+    vertex: textureVert,
+    fragment: textureFrag,
   },
 };
 
