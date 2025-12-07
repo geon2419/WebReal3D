@@ -19,7 +19,7 @@ export interface Material {
   /**
    * Optional method to write material-specific uniform data to the buffer.
    * @param buffer - DataView of the uniform buffer
-   * @param offset - Byte offset to start writing (typically 64, after MVP matrix)
+   * @param offset - Byte offset to start writing. The default offset may vary depending on the material implementation (e.g., after MVP matrix).
    */
   writeUniformData?(buffer: DataView, offset?: number): void;
   /**
