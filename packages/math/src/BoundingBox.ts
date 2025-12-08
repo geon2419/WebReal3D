@@ -29,6 +29,10 @@ export class BoundingBox {
    * @returns A BoundingBox that contains all positions
    */
   static fromPositions(positions: Float32Array): BoundingBox {
+    if (positions.length === 0) {
+      return new BoundingBox();
+    }
+
     const box = new BoundingBox();
 
     for (let i = 0; i < positions.length; i += 3) {
@@ -108,8 +112,16 @@ export class BoundingBox {
    * @returns This bounding box for chaining
    */
   expandByPoint(point: Vector3): this {
-    this.min = Vector3.min(this.min, point);
-    this.max = Vector3.max(this.max, point);
+    this.min.set(
+      Math.min(this.min.x, point.x),
+      Math.min(this.min.y, point.y),
+      Math.min(this.min.z, point.z)
+    );
+    this.max.set(
+      Math.max(this.max.x, point.x),
+      Math.max(this.max.y, point.y),
+      Math.max(this.max.z, point.z)
+    );
     return this;
   }
 
