@@ -21,8 +21,8 @@ export interface TextureOptions {
    * - 'bgra8unorm' - Alternative byte order (platform-dependent)
    * - 'bgra8unorm-srgb' - Alternative byte order with gamma correction
    *
-   * For other formats (HDR, normal maps, etc.), use `createEmpty()` and
-   * upload data manually via compute shader or staging buffer.
+   * For other formats (HDR, normal maps, etc.), create a texture manually using the
+   * `Texture` constructor and upload data via compute shader or staging buffer.
    */
   format?: GPUTextureFormat;
 

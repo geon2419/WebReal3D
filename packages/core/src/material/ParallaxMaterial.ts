@@ -148,7 +148,7 @@ export class ParallaxMaterial implements Material {
       // Create a sampler using default options from Texture
       const sampler = device.createSampler(DEFAULT_SAMPLER_OPTIONS);
 
-      this._dummyNormalTexture = new Texture(texture, sampler, 1, 1);
+      this._dummyNormalTexture = new Texture(texture, sampler, 1, 1, "rgba8unorm", 1);
     }
     return this._dummyNormalTexture;
   }
