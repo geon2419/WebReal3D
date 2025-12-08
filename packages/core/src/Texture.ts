@@ -1,4 +1,74 @@
 /**
+ * Options for creating a texture.
+ */
+export interface TextureOptions {
+  /**
+   * The texture format. Defaults to 'rgba8unorm'.
+   *
+   * **Note:** When using `fromURL()`, only formats compatible with
+   * `copyExternalImageToTexture` are supported:
+   * - 'rgba8unorm' - Standard color texture
+   * - 'rgba8unorm-srgb' - Color texture with automatic gamma correction
+   * - 'bgra8unorm' - Alternative byte order (platform-dependent)
+   * - 'bgra8unorm-srgb' - Alternative byte order with gamma correction
+   *
+   * For other formats (HDR, normal maps, etc.), use `createEmpty()` and
+   * upload data manually via compute shader or staging buffer.
+   */
+  format?: GPUTextureFormat;
+
+  /**
+   * If true, automatically converts format to sRGB variant for gamma correction.
+   * Applies to:
+   * - 'rgba8unorm' -> 'rgba8unorm-srgb'
+   * - 'bgra8unorm' -> 'bgra8unorm-srgb'
+   * Defaults to false.
+   */
+  srgb?: boolean;
+
+  /**
+   * Custom sampler options. Merged with default values.
+   */
+  sampler?: Partial<GPUSamplerDescriptor>;
+
+  /**
+   * Optional label for debugging.
+   */
+  label?: string;
+}
+
+/**
+ * Default sampler configuration.
+ */
+const DEFAULT_SAMPLER_OPTIONS: GPUSamplerDescriptor = {
+  magFilter: "linear",
+  minFilter: "linear",
+  mipmapFilter: "linear",
+  addressModeU: "repeat",
+  addressModeV: "repeat",
+};
+
+/**
+ * Formats that require specific device features for filtering.
+ */
+const FEATURE_REQUIRED_FORMATS: Record<string, GPUFeatureName> = {
+  rgba32float: "float32-filterable",
+  rg32float: "float32-filterable",
+  r32float: "float32-filterable",
+};
+
+/**
+ * Formats compatible with copyExternalImageToTexture.
+ * Other formats require manual data upload.
+ */
+const COPY_EXTERNAL_IMAGE_FORMATS: Set<GPUTextureFormat> = new Set([
+  "rgba8unorm",
+  "rgba8unorm-srgb",
+  "bgra8unorm",
+  "bgra8unorm-srgb",
+]);
+
+/**
  * Represents a texture that can be used for rendering.
  * Wraps a GPUTexture and GPUSampler for WebGPU usage.
  */
@@ -7,6 +77,7 @@ export class Texture {
   private _gpuSampler: GPUSampler;
   private _width: number;
   private _height: number;
+  private _format: GPUTextureFormat;
 
   /**
    * Creates a new Texture instance.
@@ -14,17 +85,20 @@ export class Texture {
    * @param gpuSampler - The WebGPU sampler object
    * @param width - Texture width in pixels
    * @param height - Texture height in pixels
+   * @param format - The texture format
    */
   constructor(
     gpuTexture: GPUTexture,
     gpuSampler: GPUSampler,
     width: number,
-    height: number
+    height: number,
+    format: GPUTextureFormat = "rgba8unorm"
   ) {
     this._gpuTexture = gpuTexture;
     this._gpuSampler = gpuSampler;
     this._width = width;
     this._height = height;
+    this._format = format;
   }
 
   /**
@@ -56,13 +130,61 @@ export class Texture {
   }
 
   /**
+   * Gets the texture format.
+   */
+  get format(): GPUTextureFormat {
+    return this._format;
+  }
+
+  /**
+   * Resolves the final texture format based on options.
+   * Handles sRGB conversion and feature validation with fallback.
+   */
+  private static resolveFormat(
+    device: GPUDevice,
+    options: TextureOptions
+  ): GPUTextureFormat {
+    let format: GPUTextureFormat = options.format ?? "rgba8unorm";
+
+    // sRGB auto-conversion
+    if (options.srgb) {
+      if (format === "rgba8unorm") {
+        format = "rgba8unorm-srgb";
+      } else if (format === "bgra8unorm") {
+        format = "bgra8unorm-srgb";
+      }
+    }
+
+    // Check for required features and fallback if not supported
+    const requiredFeature = FEATURE_REQUIRED_FORMATS[format];
+    if (requiredFeature && !device.features.has(requiredFeature)) {
+      console.warn(
+        `[Texture] Format '${format}' requires '${requiredFeature}' feature which is not supported. Falling back to 'rgba8unorm'.`
+      );
+      return "rgba8unorm";
+    }
+
+    return format;
+  }
+
+  /**
    * Loads a texture from a URL.
+   *
+   * **Supported formats:** Only 8-bit unorm formats compatible with
+   * `copyExternalImageToTexture` are supported: `rgba8unorm`, `rgba8unorm-srgb`,
+   * `bgra8unorm`, `bgra8unorm-srgb`. For other formats, use `createEmpty()`.
+   *
    * @param device - The WebGPU device
    * @param url - URL to the image file
+   * @param options - Optional texture configuration
    * @returns A promise that resolves to a Texture instance
-   * @throws {Error} If the network request fails, image format is invalid, or GPU resources cannot be created
+   * @throws {Error} If the network request fails, image format is invalid, format is unsupported, or GPU resources cannot be created
    */
-  static async fromURL(device: GPUDevice, url: string): Promise<Texture> {
+  static async fromURL(
+    device: GPUDevice,
+    url: string,
+    options: TextureOptions = {}
+  ): Promise<Texture> {
     try {
       // Load the image
       const response = await fetch(url);
@@ -83,10 +205,26 @@ export class Texture {
 
       const imageBitmap = await createImageBitmap(blob);
 
+      // Resolve format with sRGB conversion and feature validation
+      const format = Texture.resolveFormat(device, options);
+
+      // Validate format compatibility with copyExternalImageToTexture
+      if (!COPY_EXTERNAL_IMAGE_FORMATS.has(format)) {
+        imageBitmap.close();
+        throw new Error(
+          `Format '${format}' is not compatible with fromURL(). ` +
+            `Supported formats: ${[...COPY_EXTERNAL_IMAGE_FORMATS].join(
+              ", "
+            )}. ` +
+            `For other formats, use createEmpty() and upload data manually.`
+        );
+      }
+
       // Create the GPU texture
       const texture = device.createTexture({
+        label: options.label ?? `Texture: ${url}`,
         size: [imageBitmap.width, imageBitmap.height, 1],
-        format: "rgba8unorm",
+        format,
         usage:
           GPUTextureUsage.TEXTURE_BINDING |
           GPUTextureUsage.COPY_DST |
@@ -100,20 +238,23 @@ export class Texture {
         [imageBitmap.width, imageBitmap.height]
       );
 
-      // Create a sampler
-      const sampler = device.createSampler({
-        magFilter: "linear",
-        minFilter: "linear",
-        mipmapFilter: "linear",
-        addressModeU: "repeat",
-        addressModeV: "repeat",
-      });
+      // Merge sampler options with defaults
+      const samplerOptions: GPUSamplerDescriptor = {
+        ...DEFAULT_SAMPLER_OPTIONS,
+        ...options.sampler,
+        label: options.label ? `Sampler: ${options.label}` : undefined,
+      };
+      const sampler = device.createSampler(samplerOptions);
+
+      // Release ImageBitmap resources
+      imageBitmap.close();
 
       return new Texture(
         texture,
         sampler,
         imageBitmap.width,
-        imageBitmap.height
+        imageBitmap.height,
+        format
       );
     } catch (error) {
       if (error instanceof Error) {
