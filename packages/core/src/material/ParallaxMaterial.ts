@@ -226,7 +226,15 @@ export class ParallaxMaterial implements Material {
     context?: RenderContext
   ): void {
     // Write model matrix at offset 64
-    // (Will be written by Renderer before calling this method)
+    if (context?.mesh) {
+      for (let i = 0; i < 16; i++) {
+        buffer.setFloat32(
+          offset + i * 4,
+          context.mesh.worldMatrix.data[i],
+          true
+        );
+      }
+    }
 
     // Write camera position at offset 128 (vec4f: xyz = position, w unused)
     if (context?.camera) {
