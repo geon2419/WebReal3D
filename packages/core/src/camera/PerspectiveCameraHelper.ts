@@ -5,7 +5,7 @@ import {
   type FrustumColors,
 } from "../geometry/FrustumGeometry";
 import { LineColorMaterial } from "../material/LineColorMaterial";
-import { Mesh } from "../Mesh";
+import { Mesh } from "../scene/Mesh";
 
 export interface PerspectiveCameraHelperOptions {
   /** Color for the near plane edges. Default: yellow */

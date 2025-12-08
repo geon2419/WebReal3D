@@ -1,9 +1,9 @@
 import { Color } from "@web-real/math";
 import type { Engine } from "./Engine";
-import type { Scene } from "./Scene";
+import type { Scene } from "./scene/Scene";
 import type { Camera } from "./camera/Camera";
 import type { Material, RenderContext } from "./material/Material";
-import { Mesh } from "./Mesh";
+import { Mesh } from "./scene/Mesh";
 import { Light } from "./light/Light";
 import { getIndexFormat } from "./geometry/Geometry";
 

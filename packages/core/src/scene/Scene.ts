@@ -1,7 +1,7 @@
 import { Object3D } from "./Object3D";
-import type { Light } from "./light/Light";
-import { DirectionalLight } from "./light/DirectionalLight";
-import { PointLight } from "./light/PointLight";
+import type { Light } from "../light/Light";
+import { DirectionalLight } from "../light/DirectionalLight";
+import { PointLight } from "../light/PointLight";
 
 export class Scene extends Object3D {
   updateMatrixWorld(): void {

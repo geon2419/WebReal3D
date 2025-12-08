@@ -1,7 +1,7 @@
-import type { Texture } from "../Texture";
+import type { Texture } from "../texture";
 import type { Camera } from "../camera/Camera";
-import type { Scene } from "../Scene";
-import type { Mesh } from "../Mesh";
+import type { Scene } from "../scene/Scene";
+import type { Mesh } from "../scene/Mesh";
 import type { Light } from "../light/Light";
 
 export interface VertexBufferLayout {

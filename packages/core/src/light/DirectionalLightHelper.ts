@@ -1,7 +1,7 @@
 import type { DirectionalLight } from "./DirectionalLight";
 import { Color } from "@web-real/math";
 import { LineMaterial } from "../material/LineMaterial";
-import { Mesh } from "../Mesh";
+import { Mesh } from "../scene/Mesh";
 import type { Geometry } from "../geometry/Geometry";
 
 export interface DirectionalLightHelperOptions {

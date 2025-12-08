@@ -1,6 +1,6 @@
 import type { Material, VertexBufferLayout } from "./Material";
 import { ShaderLib } from "../shaders";
-import type { Texture } from "../Texture";
+import type { Texture } from "../texture";
 
 export interface TextureMaterialOptions {
   texture: Texture;

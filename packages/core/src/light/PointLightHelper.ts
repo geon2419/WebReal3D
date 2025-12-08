@@ -1,7 +1,7 @@
 import type { PointLight } from "./PointLight";
 import { Color } from "@web-real/math";
 import { LineMaterial } from "../material/LineMaterial";
-import { Mesh } from "../Mesh";
+import { Mesh } from "../scene/Mesh";
 import type { Geometry } from "../geometry/Geometry";
 
 /**

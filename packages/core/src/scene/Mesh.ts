@@ -1,9 +1,9 @@
-import type { Geometry, IndexArray } from "./geometry/Geometry";
-import type { Material } from "./material/Material";
-import { VertexColorMaterial } from "./material/VertexColorMaterial";
+import type { Geometry, IndexArray } from "../geometry/Geometry";
+import type { Material } from "../material/Material";
+import { VertexColorMaterial } from "../material/VertexColorMaterial";
 import { Object3D } from "./Object3D";
 import { BoundingBox } from "@web-real/math";
-import { computeBoundingBox } from "./geometry/BoundingUtils";
+import { computeBoundingBox } from "../geometry/BoundingUtils";
 
 export class Mesh extends Object3D {
   private _geometry: Geometry;

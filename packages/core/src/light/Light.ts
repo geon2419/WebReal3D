@@ -1,5 +1,5 @@
 import { Color } from "@web-real/math";
-import { Object3D } from "../Object3D";
+import { Object3D } from "../scene/Object3D";
 
 export abstract class Light extends Object3D {
   public color: Color;

@@ -38,21 +38,23 @@ export {
   type AttenuationType,
   PointLightHelper,
 } from "./light";
-export { Object3D } from "./Object3D";
-export { Scene } from "./Scene";
-export { Mesh } from "./Mesh";
+export { Object3D, Scene, Mesh } from "./scene";
 export {
   PerspectiveCameraHelper,
   type PerspectiveCameraHelperOptions,
 } from "./camera/PerspectiveCameraHelper";
-export { Ray, type RayTriangleIntersection } from "./Ray";
-export { Raycaster, type Intersection } from "./Raycaster";
+export {
+  Ray,
+  type RayTriangleIntersection,
+  Raycaster,
+  type Intersection,
+} from "./raycasting";
 export {
   Texture,
   type TextureOptions,
   SamplerPresets,
   DEFAULT_SAMPLER_OPTIONS,
+  MipmapGenerator,
   calculateMipLevelCount,
   isRenderableFormat,
-} from "./Texture";
-export { MipmapGenerator } from "./MipmapGenerator";
+} from "./texture";

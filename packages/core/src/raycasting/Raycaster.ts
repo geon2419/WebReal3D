@@ -1,9 +1,9 @@
 import { BarycentricCoordinates, Vector2, Vector3 } from "@web-real/math";
 import { Ray } from "./Ray";
-import type { Camera } from "./camera/Camera";
-import type { PerspectiveCamera } from "./camera/PerspectiveCamera";
-import type { Object3D } from "./Object3D";
-import type { Mesh } from "./Mesh";
+import type { Camera } from "../camera/Camera";
+import type { PerspectiveCamera } from "../camera/PerspectiveCamera";
+import type { Object3D } from "../scene/Object3D";
+import type { Mesh } from "../scene/Mesh";
 
 /**
  * Helper class for creating rays from camera and screen coordinates.

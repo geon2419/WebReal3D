@@ -1,6 +1,6 @@
 import type { Material, VertexBufferLayout, RenderContext } from "./Material";
 import { ShaderLib } from "../shaders";
-import { Texture, DEFAULT_SAMPLER_OPTIONS } from "../Texture";
+import { Texture, DEFAULT_SAMPLER_OPTIONS } from "../texture";
 import { PointLight } from "../light/PointLight";
 
 export interface ParallaxMaterialOptions {
@@ -148,7 +148,14 @@ export class ParallaxMaterial implements Material {
       // Create a sampler using default options from Texture
       const sampler = device.createSampler(DEFAULT_SAMPLER_OPTIONS);
 
-      this._dummyNormalTexture = new Texture(texture, sampler, 1, 1, "rgba8unorm", 1);
+      this._dummyNormalTexture = new Texture(
+        texture,
+        sampler,
+        1,
+        1,
+        "rgba8unorm",
+        1
+      );
     }
     return this._dummyNormalTexture;
   }

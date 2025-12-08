@@ -1,5 +1,5 @@
 import { Matrix4, Vector3 } from "@web-real/math";
-import { Object3D } from "../Object3D";
+import { Object3D } from "../scene/Object3D";
 
 export abstract class Camera extends Object3D {
   protected _target: Vector3 = new Vector3(0, 0, 0);
