@@ -16,6 +16,10 @@ export interface BlinnPhongMaterialOptions {
   displacementScale?: number;
   /** Displacement bias offset (default: 0.0) */
   displacementBias?: number;
+  /** Optional normal map texture for surface detail */
+  normalMap?: Texture;
+  /** Normal map intensity multiplier (default: 1.0) */
+  normalScale?: number;
 }
 
 export class BlinnPhongMaterial implements Material {
@@ -32,6 +36,10 @@ export class BlinnPhongMaterial implements Material {
   readonly displacementScale: number;
   /** Displacement bias offset */
   readonly displacementBias: number;
+  /** Optional normal map texture for surface detail */
+  readonly normalMap?: Texture;
+  /** Normal map intensity multiplier */
+  readonly normalScale: number;
 
   constructor(options: BlinnPhongMaterialOptions = {}) {
     this.color = options.color
@@ -42,6 +50,8 @@ export class BlinnPhongMaterial implements Material {
     this.displacementMap = options.displacementMap;
     this.displacementScale = options.displacementScale ?? 1.0;
     this.displacementBias = options.displacementBias ?? 0.0;
+    this.normalMap = options.normalMap;
+    this.normalScale = options.normalScale ?? 1.0;
   }
 
   getVertexShader(): string {
@@ -54,8 +64,8 @@ export class BlinnPhongMaterial implements Material {
 
   getVertexBufferLayout(): VertexBufferLayout {
     return {
-      // position(vec3f) + normal(vec3f) + uv(vec2f) = 8 floats × 4 bytes = 32 bytes
-      arrayStride: 32,
+      // position(vec3f) + normal(vec3f) + uv(vec2f) + tangent(vec3f) + bitangent(vec3f) = 14 floats × 4 bytes = 56 bytes
+      arrayStride: 56,
       attributes: [
         {
           shaderLocation: 0,
@@ -72,6 +82,16 @@ export class BlinnPhongMaterial implements Material {
           offset: 24,
           format: "float32x2", // uv
         },
+        {
+          shaderLocation: 3,
+          offset: 32,
+          format: "float32x3", // tangent
+        },
+        {
+          shaderLocation: 4,
+          offset: 44,
+          format: "float32x3", // bitangent
+        },
       ],
     };
   }
@@ -82,20 +102,20 @@ export class BlinnPhongMaterial implements Material {
   }
 
   /**
-   * Gets textures for binding. Returns displacement map or dummy black texture.
-   * @param device - WebGPU device for creating dummy texture if needed
-   * @returns Array with displacement texture
+   * Gets textures for binding. Returns [displacementMap, normalMap] with dummy fallbacks.
+   * @param device - WebGPU device for creating dummy textures if needed
+   * @returns Array with [displacement texture, normal texture]
    */
   getTextures(device?: GPUDevice): Texture[] {
-    if (this.displacementMap) {
-      return [this.displacementMap];
-    }
     if (!device) {
       throw new Error(
-        "BlinnPhongMaterial.getTextures() requires a GPUDevice parameter when no displacement map is provided"
+        "BlinnPhongMaterial.getTextures() requires a GPUDevice parameter"
       );
     }
-    return [DummyTextures.getBlack(device)];
+    const displacementTex =
+      this.displacementMap ?? DummyTextures.getBlack(device);
+    const normalTex = this.normalMap ?? DummyTextures.getNormal(device);
+    return [displacementTex, normalTex];
   }
 
   getPrimitiveTopology(): GPUPrimitiveTopology {
@@ -221,10 +241,10 @@ export class BlinnPhongMaterial implements Material {
       buffer.setFloat32(offset + 188, 0, true); // offset 252 (w unused)
     }
 
-    // Write displacement params at offset 288 (vec4f: x=scale, y=bias, zw=unused)
+    // Write displacement params at offset 288 (vec4f: x=scale, y=bias, z=normalScale, w=unused)
     buffer.setFloat32(offset + 224, this.displacementScale, true); // offset 288
     buffer.setFloat32(offset + 228, this.displacementBias, true); // offset 292
-    buffer.setFloat32(offset + 232, 0, true); // offset 296 (unused)
+    buffer.setFloat32(offset + 232, this.normalScale, true); // offset 296 (normalScale)
     buffer.setFloat32(offset + 236, 0, true); // offset 300 (unused)
   }
 }
