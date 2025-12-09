@@ -332,8 +332,7 @@ export class BlinnPhongMaterial implements Material {
 
   /**
    * Writes point light data to the uniform buffer.
-  /**
-   * Writes point light data to the uniform buffer.
+
    * @param buffer - DataView of the uniform buffer
    * @param offset - Base offset
    * @param light - Point light instance
@@ -371,8 +370,7 @@ export class BlinnPhongMaterial implements Material {
 
   /**
    * Writes default light data when no light is in the scene.
-  /**
-   * Writes default light data when no light is in the scene.
+
    * @param buffer - DataView of the uniform buffer
    * @param offset - Base offset
    */
