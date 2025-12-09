@@ -1,9 +1,9 @@
 import { Matrix4, Vector3 } from "@web-real/math";
 
 export class Object3D {
-  public readonly position: Vector3 = new Vector3(0, 0, 0);
-  public readonly rotation: Vector3 = new Vector3(0, 0, 0);
-  public readonly scale: Vector3 = new Vector3(1, 1, 1);
+  private _position: Vector3 = new Vector3(0, 0, 0);
+  private _rotation: Vector3 = new Vector3(0, 0, 0);
+  private _scale: Vector3 = new Vector3(1, 1, 1);
   public parent: Object3D | null = null;
   public readonly children: Object3D[] = [];
   /** Whether this object is visible and should be rendered */
@@ -12,6 +12,30 @@ export class Object3D {
   public readonly localMatrix: Matrix4 = new Matrix4();
   /** World transformation matrix (includes parent transforms) */
   public readonly worldMatrix: Matrix4 = new Matrix4();
+
+  get position(): Vector3 {
+    return this._position;
+  }
+
+  set position(value: Vector3) {
+    this._position = value;
+  }
+
+  get rotation(): Vector3 {
+    return this._rotation;
+  }
+
+  set rotation(value: Vector3) {
+    this._rotation = value;
+  }
+
+  get scale(): Vector3 {
+    return this._scale;
+  }
+
+  set scale(value: Vector3) {
+    this._scale = value;
+  }
 
   add(child: Object3D): this {
     if (child.parent !== null) {
