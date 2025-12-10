@@ -34,20 +34,13 @@ export type HDRFormat = "rgba16float" | "rgba32float";
 
 export interface HDRLoaderOptions
   extends Omit<TextureOptions, "format" | "srgb"> {
-  /**
-   * Output texture format.
-   * - `rgba16float`: Half-precision (16-bit), good balance of quality and memory (default)
-   * - `rgba32float`: Full precision (32-bit), highest quality but 2x memory
-   */
   format?: HDRFormat;
-  /**
-   * Apply exposure correction from HDR file header.
-   * When true, pixel values are multiplied by the exposure value in the file.
-   * @default true
-   */
   applyExposure?: boolean;
 }
 
+/**
+ * Error thrown when HDR loading or parsing fails.
+ */
 export class HDRLoaderError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
     super(message);
@@ -56,33 +49,23 @@ export class HDRLoaderError extends Error {
 }
 
 /**
- * Loader for Radiance HDR (.hdr) files.
- * Converts HDR images to WebGPU textures with proper float encoding
- * for use in physically-based rendering and image-based lighting.
+ * Loads Radiance HDR (.hdr) files and converts them to WebGPU textures for PBR/IBL rendering.
  *
  * @example
  * ```ts
- * // Basic usage
  * const hdrTexture = await HDRLoader.fromURL(device, 'environment.hdr');
- *
- * // With options
- * const hdrTexture = await HDRLoader.fromURL(device, 'environment.hdr', {
- *   format: 'rgba32float',  // Higher precision
+ * const hdrTexture = await HDRLoader.fromURL(device, 'env.hdr', {
+ *   format: 'rgba32float',
  *   generateMipmaps: true,
- *   label: 'Environment Map',
  * });
- *
- * // Use with PMREMGenerator
- * const generator = PMREMGenerator.get(device);
- * const { prefilteredMap, irradianceMap } = await generator.fromEquirectangular(hdrTexture);
  * ```
  */
 export class HDRLoader {
   /**
    * Loads an HDR texture from a URL.
-   * @param device - The WebGPU device
+   * @param device - WebGPU device
    * @param url - URL to the .hdr file
-   * @param options - Loading options
+   * @param options - Loading and texture options
    * @returns Promise resolving to a Texture instance
    * @throws {HDRLoaderError} If loading or parsing fails
    */
@@ -135,9 +118,9 @@ export class HDRLoader {
 
   /**
    * Loads an HDR texture from an ArrayBuffer.
-   * @param device - The WebGPU device
-   * @param buffer - The HDR file data as ArrayBuffer
-   * @param options - Loading options
+   * @param device - WebGPU device
+   * @param buffer - HDR file data as ArrayBuffer
+   * @param options - Loading and texture options
    * @returns Promise resolving to a Texture instance
    * @throws {HDRLoaderError} If parsing fails
    */
@@ -146,42 +129,9 @@ export class HDRLoader {
     buffer: ArrayBuffer,
     options: HDRLoaderOptions = {}
   ): Promise<Texture> {
-    if (!device) {
-      throw new HDRLoaderError("GPU device is required");
-    }
-
-    if (!buffer || !(buffer instanceof ArrayBuffer)) {
-      throw new HDRLoaderError("Valid ArrayBuffer is required");
-    }
-
-    if (buffer.byteLength === 0) {
-      throw new HDRLoaderError("ArrayBuffer cannot be empty");
-    }
-
-    let parsed: RGBEResult;
-
-    try {
-      parsed = parseRGBE(buffer);
-    } catch (error) {
-      if (error instanceof RGBEParserError) {
-        throw new HDRLoaderError(
-          `Invalid HDR file format: ${error.message}`,
-          error
-        );
-      }
-
-      throw new HDRLoaderError(
-        `Failed to parse HDR data: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        error
-      );
-    }
-
+    this.validateInputs(device, buffer);
+    const parsed = this.parseHDRBuffer(buffer);
     const { width, height, data, exposure } = parsed;
-    const format: HDRFormat = options.format ?? "rgba16float";
-    const applyExposure = options.applyExposure !== false;
-    const shouldGenerateMipmaps = options.generateMipmaps !== false;
 
     if (width <= 0 || height <= 0) {
       throw new HDRLoaderError(
@@ -189,50 +139,31 @@ export class HDRLoader {
       );
     }
 
-    // Check for required GPU features before processing
-    if (
-      format === "rgba32float" &&
-      !device.features.has("float32-filterable")
-    ) {
-      throw new HDRLoaderError(
-        "Device does not support 'float32-filterable' feature required for rgba32float format. " +
-          "Use 'rgba16float' format instead or ensure the GPU supports this feature."
-      );
-    }
+    const format = options.format ?? "rgba16float";
+    this.validateGPUFeatures(device, format);
+
+    const shouldGenerateMipmaps = options.generateMipmaps !== false;
 
     let gpuTexture: GPUTexture | null = null;
-    let gpuSampler: GPUSampler | null = null;
 
     try {
-      // Apply exposure correction if enabled and exposure != 1.0
-      let processedData = data;
-      if (applyExposure && exposure !== 1.0) {
-        processedData = applyExposureCorrection(data, exposure);
-      }
+      const { uploadData, bytesPerPixel } = this.processHDRData(
+        data,
+        exposure,
+        format,
+        options.applyExposure
+      );
 
-      // Convert to appropriate format
-      let uploadData: Uint16Array | Float32Array;
-      let bytesPerPixel: number;
-
-      if (format === "rgba16float") {
-        uploadData = toFloat16Array(processedData);
-        bytesPerPixel = BYTES_PER_PIXEL_F16;
-      } else {
-        uploadData = processedData;
-        bytesPerPixel = BYTES_PER_PIXEL_F32;
-      }
-
-      // Calculate mip levels
-      let mipLevelCount = 1;
-      if (shouldGenerateMipmaps && isRenderableFormat(format)) {
-        mipLevelCount = calculateMipLevelCount(width, height);
-      }
+      const mipLevelCount =
+        shouldGenerateMipmaps && isRenderableFormat(format)
+          ? calculateMipLevelCount(width, height)
+          : 1;
 
       // Create GPU texture
       gpuTexture = device.createTexture({
         label: options.label ?? "HDRTexture",
         size: [width, height, 1],
-        format: format as GPUTextureFormat, // Type assertion for WebGPU API compatibility
+        format: format as GPUTextureFormat,
         mipLevelCount,
         usage:
           GPUTextureUsage.TEXTURE_BINDING |
@@ -257,15 +188,7 @@ export class HDRLoader {
         mipmapGenerator.generateMipmap(gpuTexture);
       }
 
-      const samplerOptions: GPUSamplerDescriptor = {
-        ...DEFAULT_SAMPLER_OPTIONS,
-        // HDR textures typically use clamp-to-edge for environment maps
-        addressModeU: "clamp-to-edge",
-        addressModeV: "clamp-to-edge",
-        ...options.sampler,
-        label: options.label ? `Sampler: ${options.label}` : undefined,
-      };
-      gpuSampler = device.createSampler(samplerOptions);
+      const gpuSampler = this.createSampler(device, options);
 
       return new Texture(
         gpuTexture,
@@ -294,6 +217,133 @@ export class HDRLoader {
   }
 
   /**
+   * Validates input parameters for HDR loading.
+   * @param device - WebGPU device
+   * @param buffer - HDR file data as ArrayBuffer
+   * @throws {HDRLoaderError} If device or buffer is invalid
+   */
+  private static validateInputs(device: GPUDevice, buffer: ArrayBuffer): void {
+    if (!device) {
+      throw new HDRLoaderError("GPU device is required");
+    }
+
+    if (!buffer || !(buffer instanceof ArrayBuffer)) {
+      throw new HDRLoaderError("Valid ArrayBuffer is required");
+    }
+
+    if (buffer.byteLength === 0) {
+      throw new HDRLoaderError("ArrayBuffer cannot be empty");
+    }
+  }
+
+  /**
+   * Parses HDR buffer data using RGBE format.
+   * @param buffer - HDR file data as ArrayBuffer
+   * @returns Parsed HDR data with dimensions, pixel data, and exposure
+   * @throws {HDRLoaderError} If parsing fails or format is invalid
+   */
+  private static parseHDRBuffer(buffer: ArrayBuffer): RGBEResult {
+    try {
+      return parseRGBE(buffer);
+    } catch (error) {
+      if (error instanceof RGBEParserError) {
+        throw new HDRLoaderError(
+          `Invalid HDR file format: ${error.message}`,
+          error
+        );
+      }
+
+      throw new HDRLoaderError(
+        `Failed to parse HDR data: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Validates GPU features for the requested texture format.
+   * @param device - WebGPU device
+   * @param format - Requested HDR texture format
+   * @throws {HDRLoaderError} If required GPU features are not supported
+   */
+  private static validateGPUFeatures(
+    device: GPUDevice,
+    format: HDRFormat
+  ): void {
+    if (
+      format === "rgba32float" &&
+      !device.features.has("float32-filterable")
+    ) {
+      throw new HDRLoaderError(
+        "Device does not support 'float32-filterable' feature required for rgba32float format. " +
+          "Use 'rgba16float' format instead or ensure the GPU supports this feature."
+      );
+    }
+  }
+
+  /**
+   * Processes HDR data by applying exposure correction and format conversion.
+   * @param data - Raw HDR pixel data in RGBA format
+   * @param exposure - Exposure value from HDR file header
+   * @param format - Target texture format (rgba16float or rgba32float)
+   * @param applyExposure - Whether to apply exposure correction (default: true)
+   * @returns Processed pixel data and bytes per pixel for upload
+   */
+  private static processHDRData(
+    data: Float32Array,
+    exposure: number,
+    format: HDRFormat,
+    applyExposure?: boolean
+  ): { uploadData: Uint16Array | Float32Array; bytesPerPixel: number } {
+    const shouldApplyExposure = applyExposure !== false;
+
+    let processedData = data;
+    if (shouldApplyExposure && exposure !== 1.0) {
+      processedData = new Float32Array(data.length);
+      for (let i = 0; i < data.length; i += 4) {
+        processedData[i] = data[i] * exposure; // R
+        processedData[i + 1] = data[i + 1] * exposure; // G
+        processedData[i + 2] = data[i + 2] * exposure; // B
+        processedData[i + 3] = data[i + 3]; // A (unchanged)
+      }
+    }
+
+    if (format === "rgba16float") {
+      return {
+        uploadData: toFloat16Array(processedData),
+        bytesPerPixel: BYTES_PER_PIXEL_F16,
+      };
+    } else {
+      return {
+        uploadData: processedData,
+        bytesPerPixel: BYTES_PER_PIXEL_F32,
+      };
+    }
+  }
+
+  /**
+   * Creates a GPU sampler with HDR-appropriate settings.
+   * @param device - WebGPU device
+   * @param options - Loader options containing sampler configuration
+   * @returns GPU sampler with clamp-to-edge address mode
+   */
+  private static createSampler(
+    device: GPUDevice,
+    options: HDRLoaderOptions
+  ): GPUSampler {
+    const samplerOptions: GPUSamplerDescriptor = {
+      ...DEFAULT_SAMPLER_OPTIONS,
+      addressModeU: "clamp-to-edge",
+      addressModeV: "clamp-to-edge",
+      ...options.sampler,
+      label: options.label ? `Sampler: ${options.label}` : undefined,
+    };
+    return device.createSampler(samplerOptions);
+  }
+
+  /**
    * Checks if a URL points to an HDR file based on extension.
    * @param url - The URL to check
    * @returns True if the URL has an .hdr extension
@@ -305,21 +355,4 @@ export class HDRLoader {
     const cleanUrl = url.split("?")[0].split("#")[0]; // Remove query/hash
     return cleanUrl.toLowerCase().endsWith(".hdr");
   }
-}
-
-/**
- * Applies exposure correction to HDR data.
- */
-function applyExposureCorrection(
-  data: Float32Array,
-  exposure: number
-): Float32Array {
-  const result = new Float32Array(data.length);
-  for (let i = 0; i < data.length; i += 4) {
-    result[i] = data[i] * exposure; // R
-    result[i + 1] = data[i + 1] * exposure; // G
-    result[i + 2] = data[i + 2] * exposure; // B
-    result[i + 3] = data[i + 3]; // A (unchanged)
-  }
-  return result;
 }
