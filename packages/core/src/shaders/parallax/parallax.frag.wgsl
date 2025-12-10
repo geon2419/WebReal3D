@@ -3,8 +3,21 @@ struct Uniforms {
   modelMatrix: mat4x4f,       // 64B offset 64
   cameraPos: vec4f,           // 16B offset 128 (xyz = position, w unused)
   materialParams: vec4f,      // 16B offset 144 (x = depthScale, y = normalScale, z = useNormalMap, w = shininess)
-  lightPos: vec4f,            // 16B offset 160 (xyz = position, w unused)
-  lightColor: vec4f,          // 16B offset 176 (rgb = color, a = intensity)
+  ambientLight: vec4f,        // 16B offset 160 (rgb = color, a = intensity)
+  lightParams: vec4f,         // 16B offset 176 (x = lightCount, yzw = reserved)
+  // lights[4]: each light is 3 vec4f (48 bytes) starting at offset 192
+  light0Position: vec4f,      // 16B offset 192 (xyz = position/direction, w unused)
+  light0Color: vec4f,         // 16B offset 208 (rgb = color, a = intensity)
+  light0Params: vec4f,        // 16B offset 224 (x = type, y = range, z = attenType, w = attenParam)
+  light1Position: vec4f,      // 16B offset 240
+  light1Color: vec4f,         // 16B offset 256
+  light1Params: vec4f,        // 16B offset 272
+  light2Position: vec4f,      // 16B offset 288
+  light2Color: vec4f,         // 16B offset 304
+  light2Params: vec4f,        // 16B offset 320
+  light3Position: vec4f,      // 16B offset 336
+  light3Color: vec4f,         // 16B offset 352
+  light3Params: vec4f,        // 16B offset 368 (total: 384B)
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -20,6 +33,68 @@ struct FragmentInput {
   @location(3) worldTangent: vec3f,
   @location(4) worldBitangent: vec3f,
   @location(5) viewDir: vec3f,
+}
+
+// Calculate light attenuation based on type
+fn calculateAttenuation(distance: f32, range: f32, attenuationType: f32, attenParam: f32) -> f32 {
+  if (range <= 0.0) {
+    return 1.0;
+  }
+  let normalizedDist = distance / range;
+  
+  if (attenuationType < 0.5) {
+    // Linear: 1 - d/range
+    return max(1.0 - normalizedDist, 0.0);
+  } else if (attenuationType < 1.5) {
+    // Quadratic: (1 - d/range)^2
+    let linear = max(1.0 - normalizedDist, 0.0);
+    return linear * linear;
+  } else {
+    // Physical: 1 / (1 + (d/range)^2 * k)
+    return 1.0 / (1.0 + normalizedDist * normalizedDist * attenParam);
+  }
+}
+
+// Calculate Blinn-Phong lighting contribution from a single light
+fn calculateBlinnPhongLight(
+  lightPosition: vec4f,
+  lightColor: vec4f,
+  lightParams: vec4f,
+  N: vec3f,
+  V: vec3f,
+  worldPos: vec3f,
+  albedo: vec3f,
+  shininess: f32
+) -> vec3f {
+  let lightType = lightParams.x;
+  let lightRange = lightParams.y;
+  let attenType = lightParams.z;
+  let attenParam = lightParams.w;
+  
+  var L: vec3f;
+  var attenuation: f32 = 1.0;
+  
+  if (lightType < 0.5) {
+    // Directional light: use direction directly (negated for incoming light)
+    L = normalize(-lightPosition.xyz);
+  } else {
+    // Point light: calculate direction and attenuation
+    let lightVec = lightPosition.xyz - worldPos;
+    let distance = length(lightVec);
+    L = normalize(lightVec);
+    attenuation = calculateAttenuation(distance, lightRange, attenType, attenParam);
+  }
+  
+  // Diffuse
+  let NdotL = max(dot(N, L), 0.0);
+  let diffuse = NdotL * albedo * lightColor.rgb * lightColor.a;
+  
+  // Specular (Blinn-Phong)
+  let H = normalize(L + V);
+  let NdotH = max(dot(N, H), 0.0);
+  let specular = pow(NdotH, shininess) * lightColor.rgb * lightColor.a;
+  
+  return (diffuse + specular) * attenuation;
 }
 
 // Steep Parallax Mapping with Parallax Occlusion
@@ -42,7 +117,7 @@ fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
   
   // Initial values
   var currentTexCoords = uv;
-  var currentDepthMapValue = textureSample(depthTexture, textureSampler, currentTexCoords).r;
+  var currentDepthMapValue = 1.0 - textureSampleLevel(depthTexture, textureSampler, currentTexCoords, 0.0).r;
   
   // Steep parallax mapping loop
   for (var i = 0; i < 32; i = i + 1) {
@@ -52,8 +127,8 @@ fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
     
     // Shift texture coordinates along direction of P
     currentTexCoords -= deltaTexCoords;
-    // Get depth map value at current texture coordinates
-    currentDepthMapValue = textureSample(depthTexture, textureSampler, currentTexCoords).r;
+    // Get depth map value at current texture coordinates (use textureSampleLevel for non-uniform control flow)
+    currentDepthMapValue = 1.0 - textureSampleLevel(depthTexture, textureSampler, currentTexCoords, 0.0).r;
     // Get depth of next layer
     currentLayerDepth += layerDepth;
   }
@@ -62,7 +137,7 @@ fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
   let prevTexCoords = currentTexCoords + deltaTexCoords;
   
   let afterDepth = currentDepthMapValue - currentLayerDepth;
-  let beforeDepth = textureSample(depthTexture, textureSampler, prevTexCoords).r - currentLayerDepth + layerDepth;
+  let beforeDepth = (1.0 - textureSampleLevel(depthTexture, textureSampler, prevTexCoords, 0.0).r) - currentLayerDepth + layerDepth;
   
   let weight = afterDepth / (afterDepth - beforeDepth);
   let finalTexCoords = prevTexCoords * weight + currentTexCoords * (1.0 - weight);
@@ -127,24 +202,59 @@ fn main(input: FragmentInput) -> @location(0) vec4f {
   // Transform normal from tangent space to world space
   let normal = normalize(TBN * normalTangent);
   
-  // Blinn-Phong lighting
-  let lightDir = normalize(uniforms.lightPos.xyz - input.worldPosition);
+  // View direction (already normalized from input)
   let viewDir = normalize(input.viewDir);
+  let shininess = uniforms.materialParams.w;
   
-  // Ambient
-  let ambient = albedo * 0.1;
+  // Ambient lighting from uniform
+  let ambient = albedo * uniforms.ambientLight.rgb * uniforms.ambientLight.a;
   
-  // Diffuse
-  let diffuseStrength = max(dot(normal, lightDir), 0.0);
-  let diffuse = diffuseStrength * albedo * uniforms.lightColor.rgb * uniforms.lightColor.a;
+  // Accumulate light contributions
+  var Lo = vec3f(0.0);
+  let lightCount = i32(uniforms.lightParams.x);
   
-  // Specular (Blinn-Phong)
-  let halfDir = normalize(lightDir + viewDir);
-  let specularStrength = pow(max(dot(normal, halfDir), 0.0), uniforms.materialParams.w);
-  let specular = specularStrength * uniforms.lightColor.rgb * uniforms.lightColor.a;
+  // Light 0
+  if (lightCount > 0) {
+    Lo += calculateBlinnPhongLight(
+      uniforms.light0Position,
+      uniforms.light0Color,
+      uniforms.light0Params,
+      normal, viewDir, input.worldPosition, albedo, shininess
+    );
+  }
   
-  // Combine lighting
-  let finalColor = ambient + diffuse + specular;
+  // Light 1
+  if (lightCount > 1) {
+    Lo += calculateBlinnPhongLight(
+      uniforms.light1Position,
+      uniforms.light1Color,
+      uniforms.light1Params,
+      normal, viewDir, input.worldPosition, albedo, shininess
+    );
+  }
+  
+  // Light 2
+  if (lightCount > 2) {
+    Lo += calculateBlinnPhongLight(
+      uniforms.light2Position,
+      uniforms.light2Color,
+      uniforms.light2Params,
+      normal, viewDir, input.worldPosition, albedo, shininess
+    );
+  }
+  
+  // Light 3
+  if (lightCount > 3) {
+    Lo += calculateBlinnPhongLight(
+      uniforms.light3Position,
+      uniforms.light3Color,
+      uniforms.light3Params,
+      normal, viewDir, input.worldPosition, albedo, shininess
+    );
+  }
+  
+  // Combine ambient and direct lighting
+  let finalColor = ambient + Lo;
   
   return vec4f(finalColor, 1.0);
 }

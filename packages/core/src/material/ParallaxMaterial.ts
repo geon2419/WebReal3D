@@ -2,6 +2,8 @@ import type { Material, VertexBufferLayout, RenderContext } from "./Material";
 import { ShaderLib } from "../shaders";
 import { Texture, DEFAULT_SAMPLER_OPTIONS } from "../texture";
 import { PointLight } from "../light/PointLight";
+import { DirectionalLight } from "../light/DirectionalLight";
+import { AmbientLight } from "../light/AmbientLight";
 
 export interface ParallaxMaterialOptions {
   albedo: Texture;
@@ -37,9 +39,9 @@ export class ParallaxMaterial implements Material {
   readonly albedo: Texture;
   readonly depth: Texture;
   readonly normal?: Texture;
-  readonly depthScale: number;
-  readonly normalScale: number;
-  readonly shininess: number;
+  private _depthScale: number;
+  private _normalScale: number;
+  private _shininess: number;
   readonly generateNormalFromDepth: boolean;
   private static _dummyNormalTexture?: Texture;
 
@@ -51,31 +53,91 @@ export class ParallaxMaterial implements Material {
     this.albedo = options.albedo;
     this.depth = options.depth;
     this.normal = options.normal;
-    this.depthScale = options.depthScale ?? 0.05;
-    this.normalScale = options.normalScale ?? 1.0;
-    this.shininess = options.shininess ?? 32.0;
+    this._depthScale = options.depthScale ?? 0.05;
+    this._normalScale = options.normalScale ?? 1.0;
+    this._shininess = options.shininess ?? 32.0;
     this.generateNormalFromDepth = options.generateNormalFromDepth ?? true;
 
     // Validate depth scale range
-    if (this.depthScale < 0.01 || this.depthScale > 0.1) {
+    if (this._depthScale < 0.01 || this._depthScale > 0.1) {
       console.warn(
-        `ParallaxMaterial: depthScale ${this.depthScale} is outside recommended range (0.01-0.1)`
+        `ParallaxMaterial: depthScale ${this._depthScale} is outside recommended range (0.01-0.1)`
       );
     }
 
     // Validate normal scale range
-    if (this.normalScale < 0.5 || this.normalScale > 2.0) {
+    if (this._normalScale < 0.5 || this._normalScale > 2.0) {
       console.warn(
-        `ParallaxMaterial: normalScale ${this.normalScale} is outside recommended range (0.5-2.0)`
+        `ParallaxMaterial: normalScale ${this._normalScale} is outside recommended range (0.5-2.0)`
       );
     }
 
     // Validate shininess range
-    if (this.shininess < 1 || this.shininess > 256) {
+    if (this._shininess < 1 || this._shininess > 256) {
       console.warn(
-        `ParallaxMaterial: shininess ${this.shininess} is outside recommended range (1-256)`
+        `ParallaxMaterial: shininess ${this._shininess} is outside recommended range (1-256)`
       );
     }
+  }
+
+  /**
+   * Gets the depth scale value.
+   */
+  get depthScale(): number {
+    return this._depthScale;
+  }
+
+  /**
+   * Sets the depth scale value.
+   * @param value - Depth scale value (recommended range: 0.01-0.1)
+   */
+  set depthScale(value: number) {
+    if (value < 0.01 || value > 0.1) {
+      console.warn(
+        `ParallaxMaterial: depthScale ${value} is outside recommended range (0.01-0.1)`
+      );
+    }
+    this._depthScale = value;
+  }
+
+  /**
+   * Gets the normal scale value.
+   */
+  get normalScale(): number {
+    return this._normalScale;
+  }
+
+  /**
+   * Sets the normal scale value.
+   * @param value - Normal scale value (recommended range: 0.5-2.0)
+   */
+  set normalScale(value: number) {
+    if (value < 0.5 || value > 2.0) {
+      console.warn(
+        `ParallaxMaterial: normalScale ${value} is outside recommended range (0.5-2.0)`
+      );
+    }
+    this._normalScale = value;
+  }
+
+  /**
+   * Gets the shininess value.
+   */
+  get shininess(): number {
+    return this._shininess;
+  }
+
+  /**
+   * Sets the shininess value.
+   * @param value - Shininess value (recommended range: 1-256)
+   */
+  set shininess(value: number) {
+    if (value < 1 || value > 256) {
+      console.warn(
+        `ParallaxMaterial: shininess ${value} is outside recommended range (1-256)`
+      );
+    }
+    this._shininess = value;
   }
 
   /**
@@ -133,11 +195,11 @@ export class ParallaxMaterial implements Material {
   }
 
   /**
-   * Gets the uniform buffer size for MVP, model matrix, camera, material params, and light data.
-   * @returns 192 bytes
+   * Gets the uniform buffer size for MVP, model matrix, camera, material params, ambient light, and up to 4 lights.
+   * @returns 384 bytes
    */
   getUniformBufferSize(): number {
-    return 192;
+    return 384;
   }
 
   /**
@@ -210,7 +272,7 @@ export class ParallaxMaterial implements Material {
   }
 
   /**
-   * Writes camera position, material parameters, and light data to the uniform buffer.
+   * Writes camera position, material parameters, ambient light, and up to 4 lights to the uniform buffer.
    * @param buffer - DataView of the uniform buffer
    * @param offset - Byte offset to start writing (default: 64). This represents the absolute position
    *                 where modelMatrix begins. All subsequent writes use relative offsets from this parameter.
@@ -224,13 +286,9 @@ export class ParallaxMaterial implements Material {
     this._writeModelMatrix(buffer, offset, context);
     this._writeCameraPosition(buffer, offset, context);
     this._writeMaterialParams(buffer, offset);
-
-    const light = context?.lights?.[0];
-    if (light instanceof PointLight) {
-      this._writePointLight(buffer, offset, light);
-    } else {
-      this._writeDefaultLight(buffer, offset);
-    }
+    this._writeAmbientLight(buffer, offset, context);
+    const lightCount = this._writeLights(buffer, offset, context);
+    this._writeLightCount(buffer, offset, lightCount);
   }
 
   /**
@@ -284,47 +342,163 @@ export class ParallaxMaterial implements Material {
   }
 
   /**
+   * Writes ambient light data to the uniform buffer.
+   * Falls back to default dim white light (rgb=1.0, intensity=0.1) if no AmbientLight found.
+   * @param buffer - DataView of the uniform buffer
+   * @param offset - Base offset (ambientLight at offset+96)
+   * @param context - Rendering context
+   */
+  private _writeAmbientLight(
+    buffer: DataView,
+    offset: number,
+    context?: RenderContext
+  ): void {
+    let ambientLight: AmbientLight | undefined;
+
+    if (context?.lights) {
+      for (const light of context.lights) {
+        if (light instanceof AmbientLight) {
+          ambientLight = light;
+          break;
+        }
+      }
+    }
+
+    if (ambientLight) {
+      buffer.setFloat32(offset + 96, ambientLight.color.r, true);
+      buffer.setFloat32(offset + 100, ambientLight.color.g, true);
+      buffer.setFloat32(offset + 104, ambientLight.color.b, true);
+      buffer.setFloat32(offset + 108, ambientLight.intensity, true);
+    } else {
+      // Default fallback: dim white ambient light
+      buffer.setFloat32(offset + 96, 1.0, true);
+      buffer.setFloat32(offset + 100, 1.0, true);
+      buffer.setFloat32(offset + 104, 1.0, true);
+      buffer.setFloat32(offset + 108, 0.1, true);
+    }
+  }
+
+  /**
+   * Writes light count to the uniform buffer.
+   * @param buffer - DataView of the uniform buffer
+   * @param offset - Base offset (lightParams at offset+112)
+   * @param lightCount - Number of active lights
+   */
+  private _writeLightCount(
+    buffer: DataView,
+    offset: number,
+    lightCount: number
+  ): void {
+    buffer.setFloat32(offset + 112, lightCount, true);
+    buffer.setFloat32(offset + 116, 0, true); // reserved
+    buffer.setFloat32(offset + 120, 0, true); // reserved
+    buffer.setFloat32(offset + 124, 0, true); // reserved
+  }
+
+  /**
+   * Writes up to 4 lights (PointLight or DirectionalLight) to the uniform buffer.
+   * @param buffer - DataView of the uniform buffer
+   * @param offset - Base offset (lights start at offset+128)
+   * @param context - Rendering context
+   * @returns Number of lights written
+   */
+  private _writeLights(
+    buffer: DataView,
+    offset: number,
+    context?: RenderContext
+  ): number {
+    const maxLights = 4;
+    const lightBaseOffset = offset + 128; // lights start after ambientLight(16) + lightParams(16)
+    let lightIndex = 0;
+
+    if (context?.lights) {
+      for (const light of context.lights) {
+        if (lightIndex >= maxLights) break;
+        if (light instanceof AmbientLight) continue; // Skip ambient, handled separately
+
+        const lightOffset = lightBaseOffset + lightIndex * 48; // Each light: 48 bytes (3 x vec4f)
+
+        if (light instanceof DirectionalLight) {
+          this._writeDirectionalLight(buffer, lightOffset, light);
+          lightIndex++;
+        } else if (light instanceof PointLight) {
+          this._writePointLight(buffer, lightOffset, light);
+          lightIndex++;
+        }
+      }
+    }
+
+    // Zero out remaining light slots
+    for (let i = lightIndex; i < maxLights; i++) {
+      const lightOffset = lightBaseOffset + i * 48;
+      for (let j = 0; j < 12; j++) {
+        buffer.setFloat32(lightOffset + j * 4, 0, true);
+      }
+    }
+
+    return lightIndex;
+  }
+
+  /**
+   * Writes directional light data to the uniform buffer.
+   * @param buffer - DataView of the uniform buffer
+   * @param lightOffset - Byte offset for this light slot
+   * @param light - DirectionalLight instance
+   */
+  private _writeDirectionalLight(
+    buffer: DataView,
+    lightOffset: number,
+    light: DirectionalLight
+  ): void {
+    // Position slot used for direction vector (negated for incoming light direction)
+    buffer.setFloat32(lightOffset, light.direction.x, true);
+    buffer.setFloat32(lightOffset + 4, light.direction.y, true);
+    buffer.setFloat32(lightOffset + 8, light.direction.z, true);
+    buffer.setFloat32(lightOffset + 12, 0, true);
+
+    // Color + intensity
+    buffer.setFloat32(lightOffset + 16, light.color.r, true);
+    buffer.setFloat32(lightOffset + 20, light.color.g, true);
+    buffer.setFloat32(lightOffset + 24, light.color.b, true);
+    buffer.setFloat32(lightOffset + 28, light.intensity, true);
+
+    // Params: type=0 (directional), rest=0
+    buffer.setFloat32(lightOffset + 32, 0, true); // type: directional
+    buffer.setFloat32(lightOffset + 36, 0, true); // range (unused)
+    buffer.setFloat32(lightOffset + 40, 0, true); // attenType (unused)
+    buffer.setFloat32(lightOffset + 44, 0, true); // attenParam (unused)
+  }
+
+  /**
    * Writes point light data to the uniform buffer.
    * @param buffer - DataView of the uniform buffer
-   * @param offset - Base offset (light data at offset+96)
-   * @param light - Point light instance
+   * @param lightOffset - Byte offset for this light slot
+   * @param light - PointLight instance
    */
   private _writePointLight(
     buffer: DataView,
-    offset: number,
+    lightOffset: number,
     light: PointLight
   ): void {
     light.updateWorldMatrix(true, false);
 
-    // Light position at offset+96
-    buffer.setFloat32(offset + 96, light.worldMatrix.data[12], true);
-    buffer.setFloat32(offset + 100, light.worldMatrix.data[13], true);
-    buffer.setFloat32(offset + 104, light.worldMatrix.data[14], true);
-    buffer.setFloat32(offset + 108, 0, true);
+    // World position from transform matrix
+    buffer.setFloat32(lightOffset, light.worldMatrix.data[12], true);
+    buffer.setFloat32(lightOffset + 4, light.worldMatrix.data[13], true);
+    buffer.setFloat32(lightOffset + 8, light.worldMatrix.data[14], true);
+    buffer.setFloat32(lightOffset + 12, 0, true);
 
-    // Light color at offset+112
-    buffer.setFloat32(offset + 112, light.color.r, true);
-    buffer.setFloat32(offset + 116, light.color.g, true);
-    buffer.setFloat32(offset + 120, light.color.b, true);
-    buffer.setFloat32(offset + 124, light.intensity, true);
-  }
+    // Color + intensity
+    buffer.setFloat32(lightOffset + 16, light.color.r, true);
+    buffer.setFloat32(lightOffset + 20, light.color.g, true);
+    buffer.setFloat32(lightOffset + 24, light.color.b, true);
+    buffer.setFloat32(lightOffset + 28, light.intensity, true);
 
-  /**
-   * Writes default light data to the uniform buffer.
-   * @param buffer - DataView of the uniform buffer
-   * @param offset - Base offset (light data at offset+96)
-   */
-  private _writeDefaultLight(buffer: DataView, offset: number): void {
-    // Default light position at offset+96
-    buffer.setFloat32(offset + 96, 2, true);
-    buffer.setFloat32(offset + 100, 2, true);
-    buffer.setFloat32(offset + 104, 3, true);
-    buffer.setFloat32(offset + 108, 0, true);
-
-    // Default light color at offset+112
-    buffer.setFloat32(offset + 112, 1, true);
-    buffer.setFloat32(offset + 116, 1, true);
-    buffer.setFloat32(offset + 120, 1, true);
-    buffer.setFloat32(offset + 124, 1, true);
+    // Params: type=1 (point), range, attenType, attenParam
+    const attenuationFactors = light.getAttenuationFactors();
+    buffer.setFloat32(lightOffset + 32, 1.0, true); // type: point
+    buffer.setFloat32(lightOffset + 36, attenuationFactors[0], true); // range
+    buffer.setFloat32(lightOffset + 40, attenuationFactors[3], true); // attenType code
+    buffer.setFloat32(lightOffset + 44, attenuationFactors[1], true); // attenParam
   }
 }
