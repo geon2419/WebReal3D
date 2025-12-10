@@ -42,7 +42,11 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
     }
   }
   
-  irradiance = PI * irradiance / sampleCount;
+  if (sampleCount > 0.0) {
+    irradiance = PI * irradiance / sampleCount;
+  } else {
+    irradiance = vec3f(0.0);
+  }
   
   return vec4f(irradiance, 1.0);
 }

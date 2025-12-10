@@ -133,7 +133,7 @@ export class PMREMGenerator {
   ): Promise<PMREMResult> {
     if (!envTexture || !envTexture.gpuTexture) {
       throw new Error(
-        "PMREMGenerator: Invalid or null environment texture provided"
+        "PMREMGenerator: Invalid environment texture: texture or gpuTexture is null"
       );
     }
 

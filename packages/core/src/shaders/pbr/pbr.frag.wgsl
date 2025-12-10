@@ -35,7 +35,7 @@ struct Uniforms {
 
 // IBL textures (mode 2) - optional, bound when useIBL is true
 @group(1) @binding(0) var iblSampler: sampler;
-@group(1) @binding(1) var prefilteredMap: texture_cube<f32>;    // Pre-filtered environment cubemap
+@group(1) @binding(1) var prefilteredMap: texture_cube<f32>;    // Prefiltered environment cubemap
 @group(1) @binding(2) var irradianceMap: texture_cube<f32>;     // Diffuse irradiance cubemap
 @group(1) @binding(3) var brdfLUT: texture_2d<f32>;             // BRDF integration LUT
 

@@ -492,7 +492,7 @@ export class PBRMaterial implements Material {
    * envParams layout:
    * - x: envMapIntensity
    * - y: lightCount
-   * - z: hasEnvMap (0 = none, 1 = equirectangular, 2 = IBL cubemap)
+   * - z: envMode (0 = none, 1 = equirectangular, 2 = IBL cubemap)
    * - w: maxMipLevel (for prefiltered map roughness LOD)
    */
   private _writeEnvParams(
