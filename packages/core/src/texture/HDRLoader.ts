@@ -17,7 +17,11 @@ import {
   calculateMipLevelCount,
   isRenderableFormat,
 } from "./MipmapGenerator";
-import { parse, type RGBEResult, RGBEParserError } from "./RGBEParser";
+import {
+  parse as parseRGBE,
+  type RGBEResult,
+  RGBEParserError,
+} from "./RGBEParser";
 import { toFloat16Array } from "./Float16";
 
 const BYTES_PER_CHANNEL_F16 = 2;
@@ -157,7 +161,7 @@ export class HDRLoader {
     let parsed: RGBEResult;
 
     try {
-      parsed = parse(buffer);
+      parsed = parseRGBE(buffer);
     } catch (error) {
       if (error instanceof RGBEParserError) {
         throw new HDRLoaderError(
