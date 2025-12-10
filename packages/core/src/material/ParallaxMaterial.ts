@@ -37,9 +37,9 @@ export class ParallaxMaterial implements Material {
   readonly albedo: Texture;
   readonly depth: Texture;
   readonly normal?: Texture;
-  readonly depthScale: number;
-  readonly normalScale: number;
-  readonly shininess: number;
+  private _depthScale: number;
+  private _normalScale: number;
+  private _shininess: number;
   readonly generateNormalFromDepth: boolean;
   private static _dummyNormalTexture?: Texture;
 
@@ -51,31 +51,91 @@ export class ParallaxMaterial implements Material {
     this.albedo = options.albedo;
     this.depth = options.depth;
     this.normal = options.normal;
-    this.depthScale = options.depthScale ?? 0.05;
-    this.normalScale = options.normalScale ?? 1.0;
-    this.shininess = options.shininess ?? 32.0;
+    this._depthScale = options.depthScale ?? 0.05;
+    this._normalScale = options.normalScale ?? 1.0;
+    this._shininess = options.shininess ?? 32.0;
     this.generateNormalFromDepth = options.generateNormalFromDepth ?? true;
 
     // Validate depth scale range
-    if (this.depthScale < 0.01 || this.depthScale > 0.1) {
+    if (this._depthScale < 0.01 || this._depthScale > 0.1) {
       console.warn(
-        `ParallaxMaterial: depthScale ${this.depthScale} is outside recommended range (0.01-0.1)`
+        `ParallaxMaterial: depthScale ${this._depthScale} is outside recommended range (0.01-0.1)`
       );
     }
 
     // Validate normal scale range
-    if (this.normalScale < 0.5 || this.normalScale > 2.0) {
+    if (this._normalScale < 0.5 || this._normalScale > 2.0) {
       console.warn(
-        `ParallaxMaterial: normalScale ${this.normalScale} is outside recommended range (0.5-2.0)`
+        `ParallaxMaterial: normalScale ${this._normalScale} is outside recommended range (0.5-2.0)`
       );
     }
 
     // Validate shininess range
-    if (this.shininess < 1 || this.shininess > 256) {
+    if (this._shininess < 1 || this._shininess > 256) {
       console.warn(
-        `ParallaxMaterial: shininess ${this.shininess} is outside recommended range (1-256)`
+        `ParallaxMaterial: shininess ${this._shininess} is outside recommended range (1-256)`
       );
     }
+  }
+
+  /**
+   * Gets the depth scale value.
+   */
+  get depthScale(): number {
+    return this._depthScale;
+  }
+
+  /**
+   * Sets the depth scale value.
+   * @param value - Depth scale value (recommended range: 0.01-0.1)
+   */
+  set depthScale(value: number) {
+    if (value < 0.01 || value > 0.15) {
+      console.warn(
+        `ParallaxMaterial: depthScale ${value} is outside recommended range (0.01-0.15)`
+      );
+    }
+    this._depthScale = value;
+  }
+
+  /**
+   * Gets the normal scale value.
+   */
+  get normalScale(): number {
+    return this._normalScale;
+  }
+
+  /**
+   * Sets the normal scale value.
+   * @param value - Normal scale value (recommended range: 0.5-2.0)
+   */
+  set normalScale(value: number) {
+    if (value < 0.5 || value > 2.0) {
+      console.warn(
+        `ParallaxMaterial: normalScale ${value} is outside recommended range (0.5-2.0)`
+      );
+    }
+    this._normalScale = value;
+  }
+
+  /**
+   * Gets the shininess value.
+   */
+  get shininess(): number {
+    return this._shininess;
+  }
+
+  /**
+   * Sets the shininess value.
+   * @param value - Shininess value (recommended range: 1-256)
+   */
+  set shininess(value: number) {
+    if (value < 1 || value > 256) {
+      console.warn(
+        `ParallaxMaterial: shininess ${value} is outside recommended range (1-256)`
+      );
+    }
+    this._shininess = value;
   }
 
   /**
