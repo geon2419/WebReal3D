@@ -24,3 +24,20 @@ export {
   type PMREMOptions,
   type PMREMResult,
 } from "./PMREMGenerator";
+export {
+  HDRLoader,
+  HDRLoaderError,
+  type HDRLoaderOptions,
+  type HDRFormat,
+} from "./HDRLoader";
+export {
+  parse as parseRGBE,
+  RGBEParserError,
+  type RGBEResult,
+} from "./RGBEParser";
+export {
+  toFloat16,
+  fromFloat16,
+  toFloat16Array,
+  fromFloat16Array,
+} from "./Float16";

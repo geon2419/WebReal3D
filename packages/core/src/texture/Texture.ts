@@ -3,6 +3,7 @@ import {
   calculateMipLevelCount,
   isRenderableFormat,
 } from "./MipmapGenerator";
+import { HDRLoader } from "./HDRLoader";
 
 // Re-export mipmap utilities for convenience
 export { calculateMipLevelCount, isRenderableFormat };
@@ -321,6 +322,13 @@ export class Texture {
     url: string,
     options: TextureOptions = {}
   ): Promise<Texture> {
+    // Delegate to HDRLoader for .hdr files
+    if (HDRLoader.isHDRFile(url)) {
+      // Extract HDR-compatible options, ignoring format and srgb
+      const { format: _format, srgb: _srgb, ...hdrOptions } = options;
+      return HDRLoader.fromURL(device, url, hdrOptions);
+    }
+
     try {
       // Load the image
       const response = await fetch(url);
