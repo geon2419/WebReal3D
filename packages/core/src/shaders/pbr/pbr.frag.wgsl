@@ -5,7 +5,7 @@ struct Uniforms {
   baseColor: vec4f,          // rgb + alpha
   pbrParams: vec4f,          // x = metalness, y = roughness, z = aoIntensity, w = normalScale
   emissive: vec4f,           // rgb + intensity
-  envParams: vec4f,          // x = envMapIntensity, y = lightCount, z = hasEnvMap, w = unused
+  envParams: vec4f,          // x = envMapIntensity, y = lightCount, z = envMode (0=none, 1=equirect, 2=IBL), w = maxMipLevel
   cameraPosition: vec4f,
   ambientLight: vec4f,       // rgb + intensity
   // lights[4]: each light is 3 vec4f (48 bytes)
@@ -31,7 +31,13 @@ struct Uniforms {
 @group(0) @binding(5) var metalnessMap: texture_2d<f32>;
 @group(0) @binding(6) var aoMap: texture_2d<f32>;
 @group(0) @binding(7) var emissiveMap: texture_2d<f32>;
-@group(0) @binding(8) var envMap: texture_2d<f32>;
+@group(0) @binding(8) var envMap: texture_2d<f32>;              // Equirectangular env map (legacy mode 1)
+
+// IBL textures (mode 2) - optional, bound when useIBL is true
+@group(1) @binding(0) var iblSampler: sampler;
+@group(1) @binding(1) var prefilteredMap: texture_cube<f32>;    // Pre-filtered environment cubemap
+@group(1) @binding(2) var irradianceMap: texture_cube<f32>;     // Diffuse irradiance cubemap
+@group(1) @binding(3) var brdfLUT: texture_2d<f32>;             // BRDF integration LUT
 
 struct FragmentInput {
   @location(0) worldNormal: vec3f,
@@ -163,6 +169,45 @@ fn calculateLightContribution(
   return (kD * albedo / PI + specular) * radiance * NdotL;
 }
 
+// Calculate IBL contribution using split-sum approximation
+fn calculateIBLContribution(
+  N: vec3f,
+  V: vec3f,
+  albedo: vec3f,
+  metalness: f32,
+  roughness: f32,
+  F0: vec3f,
+  ao: f32,
+  envMapIntensity: f32,
+  maxMipLevel: f32
+) -> vec3f {
+  let NdotV = max(dot(N, V), 0.0);
+  let R = reflect(-V, N);
+  
+  // Sample irradiance map for diffuse IBL
+  let irradiance = textureSample(irradianceMap, iblSampler, N).rgb;
+  
+  // Sample prefiltered environment map for specular IBL
+  let mipLevel = roughness * maxMipLevel;
+  let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, mipLevel).rgb;
+  
+  // Sample BRDF LUT
+  let brdf = textureSample(brdfLUT, iblSampler, vec2f(NdotV, roughness)).rg;
+  
+  // Fresnel-Schlick with roughness
+  let F = fresnelSchlickRoughness(NdotV, F0, roughness);
+  
+  // Diffuse IBL (Lambertian)
+  let kS = F;
+  let kD = (1.0 - kS) * (1.0 - metalness);
+  let diffuseIBL = kD * irradiance * albedo;
+  
+  // Specular IBL (split-sum approximation)
+  let specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+  
+  return (diffuseIBL + specularIBL) * ao * envMapIntensity;
+}
+
 @fragment
 fn main(input: FragmentInput) -> @location(0) vec4f {
   // Construct TBN matrix
@@ -235,24 +280,30 @@ fn main(input: FragmentInput) -> @location(0) vec4f {
   let ambientColor = uniforms.ambientLight.rgb * uniforms.ambientLight.a;
   var ambient = ambientColor * albedo * ao;
   
-  // Environment map reflection (simple equirectangular sampling)
-  let hasEnvMap = uniforms.envParams.z;
-  if (hasEnvMap > 0.5) {
+  // Environment/IBL contribution
+  let envMode = uniforms.envParams.z;
+  let envMapIntensity = uniforms.envParams.x;
+  let maxMipLevel = uniforms.envParams.w;
+  
+  if (envMode > 1.5) {
+    // Mode 2: IBL with prefilteredMap + irradianceMap (PMREM)
+    ambient += calculateIBLContribution(
+      N, V, albedo, metalness, roughness, F0, ao, envMapIntensity, maxMipLevel
+    );
+  } else if (envMode > 0.5) {
+    // Mode 1: Legacy equirectangular environment map
     let R = reflect(-V, N);
     let envUV = sampleEquirectangular(R);
     
     // Use roughness to select mip level (approximation)
-    let maxMipLevel = 8.0;
     let mipLevel = roughness * maxMipLevel;
     let envColor = textureSampleLevel(envMap, textureSampler, envUV, mipLevel).rgb;
     
     // Fresnel for environment reflection
     let F_env = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-    let kS_env = F_env;
-    let kD_env = (1.0 - kS_env) * (1.0 - metalness);
     
     // Add environment contribution
-    let envContribution = envColor * F_env * uniforms.envParams.x;
+    let envContribution = envColor * F_env * envMapIntensity;
     ambient += envContribution * ao;
   }
   

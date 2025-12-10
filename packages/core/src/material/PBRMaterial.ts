@@ -6,6 +6,8 @@ import { PointLight } from "../light/PointLight";
 import { AmbientLight } from "../light/AmbientLight";
 import type { Texture } from "../texture";
 import { DummyTextures } from "../texture";
+import type { CubeTexture } from "../texture/CubeTexture";
+import { BRDFLut } from "../texture/BRDFLut";
 
 export interface PBRMaterialOptions {
   /** Base color of the material (default: white) */
@@ -34,10 +36,16 @@ export interface PBRMaterialOptions {
   emissiveIntensity?: number;
   /** Emissive texture map */
   emissiveMap?: Texture;
-  /** Environment map (equirectangular) for reflections */
+  /** Environment map (equirectangular) for reflections - use prefilteredMap for better quality */
   envMap?: Texture;
   /** Environment map intensity (default: 1.0) */
   envMapIntensity?: number;
+  /** Pre-filtered environment cubemap for specular IBL (from PMREMGenerator) */
+  prefilteredMap?: CubeTexture;
+  /** Irradiance cubemap for diffuse IBL (from PMREMGenerator) */
+  irradianceMap?: CubeTexture;
+  /** BRDF integration LUT - automatically uses shared LUT if not provided */
+  brdfLUT?: Texture;
   /** Wireframe rendering mode */
   wireframe?: boolean;
 }
@@ -77,6 +85,9 @@ export class PBRMaterial implements Material {
   readonly aoMap?: Texture;
   readonly emissiveMap?: Texture;
   readonly envMap?: Texture;
+  readonly prefilteredMap?: CubeTexture;
+  readonly irradianceMap?: CubeTexture;
+  private _brdfLUT?: Texture;
 
   // Getters
   get color(): Color {
@@ -137,6 +148,26 @@ export class PBRMaterial implements Material {
     this.aoMap = options.aoMap;
     this.emissiveMap = options.emissiveMap;
     this.envMap = options.envMap;
+    this.prefilteredMap = options.prefilteredMap;
+    this.irradianceMap = options.irradianceMap;
+    this._brdfLUT = options.brdfLUT;
+  }
+
+  /**
+   * Checks if the material uses proper IBL (PMREM-based) instead of simple environment mapping.
+   * @returns true if prefilteredMap and irradianceMap are set
+   */
+  get useIBL(): boolean {
+    return !!(this.prefilteredMap && this.irradianceMap);
+  }
+
+  /**
+   * Gets the BRDF LUT texture. Returns the shared LUT if not explicitly set.
+   * @param device - WebGPU device for creating the shared BRDF LUT
+   * @returns The BRDF LUT texture
+   */
+  getBRDFLut(device: GPUDevice): Texture {
+    return this._brdfLUT ?? BRDFLut.get(device);
   }
 
   /**
@@ -321,8 +352,31 @@ export class PBRMaterial implements Material {
       this.metalnessMap ?? whiteTex, // binding 5: metalness map (white = 1.0, use uniform)
       this.aoMap ?? whiteTex, // binding 6: ao map (white = 1.0, no occlusion)
       this.emissiveMap ?? blackTex, // binding 7: emissive map (black = no emission)
-      this.envMap ?? blackTex, // binding 8: environment map
+      this.envMap ?? blackTex, // binding 8: environment map (equirectangular, legacy)
     ];
+  }
+
+  /**
+   * Gets IBL cubemap textures for physically-based image-based lighting.
+   * Returns null if IBL is not configured (prefilteredMap and irradianceMap not set).
+   *
+   * @param device - WebGPU device for creating the shared BRDF LUT
+   * @returns Object with prefilteredMap, irradianceMap, and brdfLUT, or null if IBL not configured
+   */
+  getIBLTextures(device: GPUDevice): {
+    prefilteredMap: CubeTexture;
+    irradianceMap: CubeTexture;
+    brdfLUT: Texture;
+  } | null {
+    if (!this.prefilteredMap || !this.irradianceMap) {
+      return null;
+    }
+
+    return {
+      prefilteredMap: this.prefilteredMap,
+      irradianceMap: this.irradianceMap,
+      brdfLUT: this.getBRDFLut(device),
+    };
   }
 
   /**
@@ -434,17 +488,37 @@ export class PBRMaterial implements Material {
    * @param buffer - DataView of the uniform buffer
    * @param offset - Base offset (envParams at offset+176)
    * @param lightCount - Number of active lights
+   *
+   * envParams layout:
+   * - x: envMapIntensity
+   * - y: lightCount
+   * - z: hasEnvMap (0 = none, 1 = equirectangular, 2 = IBL cubemap)
+   * - w: maxMipLevel (for prefiltered map roughness LOD)
    */
   private _writeEnvParams(
     buffer: DataView,
     offset: number,
     lightCount: number
   ): void {
-    const hasEnvMap = this.envMap ? 1.0 : 0.0;
+    // Determine environment map mode:
+    // 0 = no environment map
+    // 1 = equirectangular map (legacy)
+    // 2 = IBL with prefilteredMap + irradianceMap (PMREM)
+    let envMode = 0.0;
+    let maxMipLevel = 0.0;
+
+    if (this.useIBL) {
+      envMode = 2.0;
+      maxMipLevel = this.prefilteredMap!.mipLevelCount - 1;
+    } else if (this.envMap) {
+      envMode = 1.0;
+      maxMipLevel = 8.0; // Default for equirectangular
+    }
+
     buffer.setFloat32(offset + 176, this._envMapIntensity, true);
     buffer.setFloat32(offset + 180, lightCount, true);
-    buffer.setFloat32(offset + 184, hasEnvMap, true);
-    buffer.setFloat32(offset + 188, 0.0, true); // unused
+    buffer.setFloat32(offset + 184, envMode, true);
+    buffer.setFloat32(offset + 188, maxMipLevel, true);
   }
 
   /**
