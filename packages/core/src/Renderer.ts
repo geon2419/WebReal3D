@@ -748,7 +748,7 @@ export class Renderer {
       const pipeline = this.getOrCreatePipeline(material);
       const resources = this.getOrCreateMeshBuffers(mesh, pipeline);
 
-      // Compute MVP(Model, View, Projection) matrix
+      // Compute clip matrix (P*V*M) for local -> clip transform
       const mvpMatrix = camera.projectionMatrix
         .multiply(camera.viewMatrix)
         .multiply(mesh.worldMatrix);

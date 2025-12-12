@@ -39,18 +39,63 @@ const PARALLAX_FLAG_INVERT_HEIGHT: u32 = 1u;
 const PARALLAX_FLAG_GENERATE_NORMAL_FROM_DEPTH: u32 = 2u;
 const PARALLAX_FLAG_SELF_SHADOW: u32 = 4u;
 
-fn getParallaxFlags() -> u32 {
-  // Stored as float in uniforms.lightParams.w
-  return u32(uniforms.lightParams.w);
+// Legacy packing: flags are stored in float uniform channels.
+const PARALLAX_FLAGS_MAX: f32 = 255.0;
+
+// Parallax tuning knobs (kept explicit for easy iteration).
+const PARALLAX_DEPTH_EPS: f32 = 1e-6;
+const PARALLAX_MIN_LAYERS: f32 = 8.0;
+const PARALLAX_MAX_LAYERS: f32 = 64.0;
+const PARALLAX_LAYERS_FROM_OFFSET_SCALE: f32 = 24.0;
+const PARALLAX_MAX_OFFSET: f32 = 0.08;
+const PARALLAX_VZ_MIN: f32 = 0.08;
+const PARALLAX_ANGLE_FADE_START: f32 = 0.12;
+const PARALLAX_ANGLE_FADE_END: f32 = 0.35;
+
+struct ParallaxParams {
+  depthScale: f32,
+  normalScale: f32,
+  useNormalMap: bool,
+  shininess: f32,
+  flags: u32,
+  selfShadowStrength: f32,
 }
 
-fn getSelfShadowStrength() -> f32 {
-  // Stored in uniforms.lightParams.y
+// Decodes parallax feature flags packed into a float uniform channel.
+// Reads uniforms.lightParams.w and converts it to a clamped u32 bitfield.
+fn uniformsGetParallaxFlags() -> u32 {
+  let f = clamp(round(uniforms.lightParams.w), 0.0, PARALLAX_FLAGS_MAX);
+  return u32(f);
+}
+
+// Reads the self-shadow strength from uniforms and clamps it to [0, 1].
+// Uses uniforms.lightParams.y as the source channel.
+fn uniformsGetSelfShadowStrength() -> f32 {
   return clamp(uniforms.lightParams.y, 0.0, 1.0);
 }
 
-fn sampleHeight(uv: vec2f) -> f32 {
-  let flags = getParallaxFlags();
+// Collects parallax-related parameters from the uniform buffer into a struct.
+// Decodes materialParams, flags, and self-shadow strength in one place.
+fn uniformsGetParallaxParams() -> ParallaxParams {
+  return ParallaxParams(
+    uniforms.materialParams.x,
+    uniforms.materialParams.y,
+    (u32(uniforms.materialParams.z) != 0u),
+    uniforms.materialParams.w,
+    uniformsGetParallaxFlags(),
+    uniformsGetSelfShadowStrength(),
+  );
+}
+
+struct ParallaxResult {
+  uv: vec2f,
+  uvDx: vec2f,
+  uvDy: vec2f,
+}
+
+// Samples the height value from the depth/height texture.
+// Applies the invert-height convention when the corresponding flag is set.
+fn parallaxSampleHeight(uv: vec2f, flags: u32) -> f32 {
   let d = textureSampleLevel(depthTexture, textureSampler, uv, 0.0).r;
   if ((flags & PARALLAX_FLAG_INVERT_HEIGHT) != 0u) {
     return 1.0 - d;
@@ -58,28 +103,203 @@ fn sampleHeight(uv: vec2f) -> f32 {
   return d;
 }
 
-// Calculate light attenuation based on type
-fn calculateAttenuation(distance: f32, range: f32, attenuationType: f32, attenParam: f32) -> f32 {
-  if (range <= 0.0) {
-    return 1.0;
-  }
-  let normalizedDist = distance / range;
-  
-  if (attenuationType < 0.5) {
-    // Linear: 1 - d/range
-    return max(1.0 - normalizedDist, 0.0);
-  } else if (attenuationType < 1.5) {
-    // Quadratic: (1 - d/range)^2
-    let linear = max(1.0 - normalizedDist, 0.0);
-    return linear * linear;
-  } else {
-    // Physical: 1 / (1 + (d/range)^2 * k)
-    return 1.0 / (1.0 + normalizedDist * normalizedDist * attenParam);
-  }
+// Computes an edge fade factor to reduce parallax near UV boundaries.
+// Helps avoid tearing and clamp artifacts at the texture edges.
+fn parallaxEdgeFade(inputUV: vec2f) -> f32 {
+  let edge = min(min(inputUV.x, 1.0 - inputUV.x), min(inputUV.y, 1.0 - inputUV.y));
+  return smoothstep(0.0, 0.05, edge);
 }
 
-// Calculate Blinn-Phong lighting contribution from a single light
-fn calculateBlinnPhongLight(
+// Displaces UVs by ray-marching along the view direction through the height field.
+// Adapts the number of layers based on view angle and offset magnitude.
+fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f, params: ParallaxParams) -> vec2f {
+  let viewDirTangent = normalize(transpose(TBN) * viewDir);
+  if (params.depthScale <= PARALLAX_DEPTH_EPS) {
+    return uv;
+  }
+
+  // Prepare step (layers + UV delta)
+  let viewZ = abs(dot(vec3f(0.0, 0.0, 1.0), viewDirTangent));
+  let layersFromAngle = mix(PARALLAX_MAX_LAYERS, PARALLAX_MIN_LAYERS, viewZ);
+
+  // Stabilize at grazing angles + clamp max offset to reduce UV tearing.
+  let vzAbs = abs(viewDirTangent.z);
+  let angleFade = smoothstep(PARALLAX_ANGLE_FADE_START, PARALLAX_ANGLE_FADE_END, vzAbs);
+  let vz = max(vzAbs, PARALLAX_VZ_MIN);
+  let baseP = (viewDirTangent.xy / vz) * params.depthScale;
+
+  let layersFromOffset = clamp(PARALLAX_MIN_LAYERS + length(baseP) * PARALLAX_LAYERS_FROM_OFFSET_SCALE, PARALLAX_MIN_LAYERS, PARALLAX_MAX_LAYERS);
+  let numLayers = clamp(max(layersFromAngle, layersFromOffset), PARALLAX_MIN_LAYERS, PARALLAX_MAX_LAYERS);
+  let layerDepth = 1.0 / numLayers;
+
+  var P = baseP;
+  let pLen = length(P);
+  if (pLen > PARALLAX_MAX_OFFSET) {
+    P *= PARALLAX_MAX_OFFSET / pLen;
+  }
+  P *= angleFade;
+  let deltaTexCoords = P / numLayers;
+
+  // Ray march
+  var currentLayerDepth = 0.0;
+  var currentTexCoords = uv;
+  var currentDepthMapValue = parallaxSampleHeight(currentTexCoords, params.flags);
+
+  for (var i = 0; i < 64; i = i + 1) {
+    if (f32(i) >= numLayers) {
+      break;
+    }
+    if (currentLayerDepth >= currentDepthMapValue) {
+      break;
+    }
+
+    currentTexCoords -= deltaTexCoords;
+    // Use textureSampleLevel due to non-uniform control flow.
+    currentDepthMapValue = parallaxSampleHeight(currentTexCoords, params.flags);
+    currentLayerDepth += layerDepth;
+  }
+
+  // Refine
+  let refineSteps = select(3, 4, numLayers > 28.0);
+  var aUV = currentTexCoords + deltaTexCoords;
+  var bUV = currentTexCoords;
+  var aDepth = currentLayerDepth - layerDepth;
+  var bDepth = currentLayerDepth;
+
+  for (var j = 0; j < 4; j = j + 1) {
+    if (j >= refineSteps) {
+      break;
+    }
+
+    let midUV = (aUV + bUV) * 0.5;
+    let midDepth = (aDepth + bDepth) * 0.5;
+    let heightMid = parallaxSampleHeight(midUV, params.flags);
+
+    if (midDepth < heightMid) {
+      aUV = midUV;
+      aDepth = midDepth;
+    } else {
+      bUV = midUV;
+      bDepth = midDepth;
+    }
+  }
+
+  let heightA = parallaxSampleHeight(aUV, params.flags);
+  let heightB = parallaxSampleHeight(bUV, params.flags);
+  let afterDepth = heightB - bDepth;
+  let beforeDepth = heightA - aDepth;
+
+  let denom = afterDepth - beforeDepth;
+  let weightUnclamped = select(afterDepth / denom, 0.5, abs(denom) < 1e-5);
+  let weight = clamp(weightUnclamped, 0.0, 1.0);
+  return aUV * weight + bUV * (1.0 - weight);
+}
+
+// Computes parallax-displaced UVs and their screen-space gradients (dpdx/dpdy).
+// Gradients are used for stable texture sampling under non-uniform control flow.
+fn parallaxComputeResult(inputUV: vec2f, viewDir: vec3f, TBN: mat3x3f, params: ParallaxParams) -> ParallaxResult {
+  let displacedUV = parallaxMapping(inputUV, viewDir, TBN, params);
+  let fade = parallaxEdgeFade(inputUV);
+  let displacedUVClamped = clamp(displacedUV, vec2f(0.0), vec2f(1.0));
+  let parallaxUV = mix(inputUV, displacedUVClamped, fade);
+
+  let uvDx = dpdx(parallaxUV);
+  let uvDy = dpdy(parallaxUV);
+
+  return ParallaxResult(parallaxUV, uvDx, uvDy);
+}
+
+// Generates a tangent-space normal by estimating height-map gradients via Sobel.
+// Used when no normal map is available to recover lighting detail from height.
+fn parallaxGenerateNormalFromDepth(uv: vec2f, texelSize: vec2f, params: ParallaxParams) -> vec3f {
+  let invertHeight = (params.flags & PARALLAX_FLAG_INVERT_HEIGHT) != 0u;
+
+  let d00Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(-texelSize.x, -texelSize.y), 0.0).r;
+  let d10Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(0.0, -texelSize.y), 0.0).r;
+  let d20Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(texelSize.x, -texelSize.y), 0.0).r;
+
+  let d01Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(-texelSize.x, 0.0), 0.0).r;
+  let d21Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(texelSize.x, 0.0), 0.0).r;
+
+  let d02Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(-texelSize.x, texelSize.y), 0.0).r;
+  let d12Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(0.0, texelSize.y), 0.0).r;
+  let d22Base = textureSampleLevel(depthTexture, textureSampler, uv + vec2f(texelSize.x, texelSize.y), 0.0).r;
+
+  let d00 = select(d00Base, 1.0 - d00Base, invertHeight);
+  let d10 = select(d10Base, 1.0 - d10Base, invertHeight);
+  let d20 = select(d20Base, 1.0 - d20Base, invertHeight);
+
+  let d01 = select(d01Base, 1.0 - d01Base, invertHeight);
+  let d21 = select(d21Base, 1.0 - d21Base, invertHeight);
+
+  let d02 = select(d02Base, 1.0 - d02Base, invertHeight);
+  let d12 = select(d12Base, 1.0 - d12Base, invertHeight);
+  let d22 = select(d22Base, 1.0 - d22Base, invertHeight);
+  
+  let dx = (d20 + 2.0 * d21 + d22) - (d00 + 2.0 * d01 + d02);
+  let dy = (d02 + 2.0 * d12 + d22) - (d00 + 2.0 * d10 + d20);
+
+  let slopeScale = params.depthScale * params.normalScale;
+  return normalize(vec3f(-dx * slopeScale, -dy * slopeScale, 1.0));
+}
+
+// Samples the albedo texture using parallax-displaced UVs and explicit gradients.
+// Uses textureSampleGrad to stabilize mip selection and filtering.
+fn surfaceSampleAlbedo(parallax: ParallaxResult) -> vec3f {
+  return textureSampleGrad(albedoTexture, textureSampler, parallax.uv, parallax.uvDx, parallax.uvDy).rgb;
+}
+
+// Applies a cheap height-based self-shadow (cavity darkening) term to albedo.
+// This is an approximation with controllable strength, not true shadowing.
+fn surfaceApplySelfShadow(albedoIn: vec3f, parallaxUV: vec2f, viewDir: vec3f, TBN: mat3x3f, params: ParallaxParams) -> vec3f {
+  if ((params.flags & PARALLAX_FLAG_SELF_SHADOW) == 0u) {
+    return albedoIn;
+  }
+
+  let strength = params.selfShadowStrength;
+  let Vt = normalize(transpose(TBN) * viewDir);
+  let grazing = 1.0 - clamp(abs(Vt.z), 0.0, 1.0);
+  let height = parallaxSampleHeight(parallaxUV, params.flags);
+  let cavity = clamp(1.0 - height, 0.0, 1.0);
+  let occlusion = 1.0 - cavity * strength * (0.25 + 0.75 * grazing);
+  return albedoIn * clamp(occlusion, 0.0, 1.0);
+}
+
+// Resolves the tangent-space normal for shading.
+// Uses the normal map if available, otherwise generates from height or falls back to (0,0,1).
+fn surfaceGetNormalTangent(parallax: ParallaxResult, params: ParallaxParams) -> vec3f {
+  if (params.useNormalMap) {
+    let normalMapSample = textureSampleGrad(normalTexture, textureSampler, parallax.uv, parallax.uvDx, parallax.uvDy).rgb;
+    var n = normalize(normalMapSample * 2.0 - 1.0);
+    n = normalize(vec3f(n.x * params.normalScale, n.y * params.normalScale, n.z));
+    return n;
+  }
+
+  if ((params.flags & PARALLAX_FLAG_GENERATE_NORMAL_FROM_DEPTH) != 0u) {
+    let dims = vec2f(textureDimensions(depthTexture, 0));
+    let texelSize = 1.0 / max(dims, vec2f(1.0));
+    return parallaxGenerateNormalFromDepth(parallax.uv, texelSize, params);
+  }
+
+  return vec3f(0.0, 0.0, 1.0);
+}
+
+// Builds a stable TBN basis by re-orthonormalizing interpolated vectors.
+// Restores handedness to keep the bitangent direction consistent.
+fn buildTBN(worldNormal: vec3f, worldTangent: vec3f, worldBitangent: vec3f) -> mat3x3f {
+  // Re-orthonormalize TBN (interpolation breaks orthogonality).
+  let N = normalize(worldNormal);
+  let T0 = normalize(worldTangent);
+  let T = normalize(T0 - N * dot(N, T0));
+  let B0 = normalize(worldBitangent);
+  let handedness = select(-1.0, 1.0, dot(cross(N, T), B0) >= 0.0);
+  let B = normalize(cross(N, T) * handedness);
+  return mat3x3f(T, B, N);
+}
+
+// Computes Blinn-Phong lighting (diffuse + specular) for a single light.
+// Supports directional and point lights with distance-based attenuation.
+fn lightingCalculateBlinnPhongLight(
   lightPosition: vec4f,
   lightColor: vec4f,
   lightParams: vec4f,
@@ -98,21 +318,28 @@ fn calculateBlinnPhongLight(
   var attenuation: f32 = 1.0;
   
   if (lightType < 0.5) {
-    // Directional light: use direction directly (negated for incoming light)
     L = normalize(-lightPosition.xyz);
   } else {
-    // Point light: calculate direction and attenuation
     let lightVec = lightPosition.xyz - worldPos;
     let distance = length(lightVec);
     L = normalize(lightVec);
-    attenuation = calculateAttenuation(distance, lightRange, attenType, attenParam);
+
+    if (lightRange > 0.0) {
+      let normalizedDist = distance / lightRange;
+      if (attenType < 0.5) {
+        attenuation = max(1.0 - normalizedDist, 0.0);
+      } else if (attenType < 1.5) {
+        let linear = max(1.0 - normalizedDist, 0.0);
+        attenuation = linear * linear;
+      } else {
+        attenuation = 1.0 / (1.0 + normalizedDist * normalizedDist * attenParam);
+      }
+    }
   }
   
-  // Diffuse
   let NdotL = max(dot(N, L), 0.0);
   let diffuse = NdotL * albedo * lightColor.rgb * lightColor.a;
   
-  // Specular (Blinn-Phong)
   let H = normalize(L + V);
   let NdotH = max(dot(N, H), 0.0);
   let specular = pow(NdotH, shininess) * lightColor.rgb * lightColor.a;
@@ -120,257 +347,106 @@ fn calculateBlinnPhongLight(
   return (diffuse + specular) * attenuation;
 }
 
-// Steep Parallax Mapping with Parallax Occlusion
-fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
-  // Transform view direction to tangent space
-  let viewDirTangent = normalize(transpose(TBN) * viewDir);
-  
-  // Number of layers for steep parallax
-  let minLayers = 8.0;
-  let maxLayers = 64.0;
-  let viewZ = abs(dot(vec3f(0.0, 0.0, 1.0), viewDirTangent));
-  let layersFromAngle = mix(maxLayers, minLayers, viewZ);
-  
-  // The amount to shift the texture coordinates per layer
-  // Divide by z to stabilize the effect at grazing angles.
-  // Additionally:
-  // - Fade parallax at very grazing angles to avoid "tearing" artifacts.
-  // - Clamp max offset to prevent UV displacement from exploding.
-  let vzAbs = abs(viewDirTangent.z);
-  let angleFade = smoothstep(0.12, 0.35, vzAbs);
-  let vz = max(vzAbs, 0.08);
-  let baseP = (viewDirTangent.xy / vz) * uniforms.materialParams.x;
-  // Increase layer count when displacement is large (helps reduce stepping/tearing).
-  let layersFromOffset = clamp(minLayers + length(baseP) * 24.0, minLayers, maxLayers);
-  let numLayers = max(layersFromAngle, layersFromOffset);
-
-  // Calculate the size of each layer
-  let layerDepth = 1.0 / numLayers;
-  var currentLayerDepth = 0.0;
-
-  var P = baseP;
-  let maxOffset = 0.08;
-  let pLen = length(P);
-  if (pLen > maxOffset) {
-    P *= maxOffset / pLen;
+// Conditionally accumulates a light contribution when enabled.
+// Keeps call sites simple and avoids unnecessary work when disabled.
+fn lightingAccumulateLight(
+  enabled: bool,
+  lightPosition: vec4f,
+  lightColor: vec4f,
+  lightParams: vec4f,
+  N: vec3f,
+  V: vec3f,
+  worldPos: vec3f,
+  albedo: vec3f,
+  shininess: f32
+) -> vec3f {
+  if (!enabled) {
+    return vec3f(0.0);
   }
-  P *= angleFade;
-  let deltaTexCoords = P / numLayers;
-  
-  // Initial values
-  var currentTexCoords = uv;
-  var currentDepthMapValue = sampleHeight(currentTexCoords);
-  
-  // Steep parallax mapping loop
-  for (var i = 0; i < 64; i = i + 1) {
-    // Honor dynamic layer count while keeping a fixed max loop for WGSL.
-    if (f32(i) >= numLayers) {
-      break;
-    }
-    if (currentLayerDepth >= currentDepthMapValue) {
-      break;
-    }
-    
-    // Shift texture coordinates along direction of P
-    currentTexCoords -= deltaTexCoords;
-    // Get depth map value at current texture coordinates (use textureSampleLevel for non-uniform control flow)
-    currentDepthMapValue = sampleHeight(currentTexCoords);
-    // Get depth of next layer
-    currentLayerDepth += layerDepth;
-  }
-  
-  // Parallax occlusion mapping - interpolation between layers
-  // Bracketed segment:
-  // - `currentTexCoords` at `currentLayerDepth` (just passed the height)
-  // - `prevTexCoords` at `prevLayerDepth` (just before passing the height)
-  var prevTexCoords = currentTexCoords + deltaTexCoords;
-  var prevLayerDepth = currentLayerDepth - layerDepth;
-
-  // Binary search refinement (fixed small step count for quality)
-  // This reduces swimming and improves silhouette detail at similar cost.
-  let refineSteps = select(3, 4, numLayers > 28.0);
-  var aUV = prevTexCoords;
-  var bUV = currentTexCoords;
-  var aDepth = prevLayerDepth;
-  var bDepth = currentLayerDepth;
-
-  for (var j = 0; j < 4; j = j + 1) {
-    if (j >= refineSteps) {
-      break;
-    }
-
-    let midUV = (aUV + bUV) * 0.5;
-    let midDepth = (aDepth + bDepth) * 0.5;
-    let heightMid = sampleHeight(midUV);
-
-    // If we're still "above" the surface (ray depth < height), move deeper.
-    if (midDepth < heightMid) {
-      aUV = midUV;
-      aDepth = midDepth;
-    } else {
-      bUV = midUV;
-      bDepth = midDepth;
-    }
-  }
-
-  // Final interpolation within refined bracket
-  let heightA = sampleHeight(aUV);
-  let heightB = sampleHeight(bUV);
-  let afterDepth = heightB - bDepth;
-  let beforeDepth = heightA - aDepth;
-
-  // Robust interpolation (avoid NaNs when depths are equal)
-  let denom = afterDepth - beforeDepth;
-  let weightUnclamped = select(afterDepth / denom, 0.5, abs(denom) < 1e-5);
-  let weight = clamp(weightUnclamped, 0.0, 1.0);
-  let finalTexCoords = aUV * weight + bUV * (1.0 - weight);
-  
-  return finalTexCoords;
-}
-
-// Generate normal from depth map using Sobel filter
-fn generateNormalFromDepth(uv: vec2f, texelSize: vec2f) -> vec3f {
-  // Sample surrounding height values (match parallax mapping convention)
-  let d00 = sampleHeight(uv + vec2f(-texelSize.x, -texelSize.y));
-  let d10 = sampleHeight(uv + vec2f(0.0, -texelSize.y));
-  let d20 = sampleHeight(uv + vec2f(texelSize.x, -texelSize.y));
-  
-  let d01 = sampleHeight(uv + vec2f(-texelSize.x, 0.0));
-  let d21 = sampleHeight(uv + vec2f(texelSize.x, 0.0));
-  
-  let d02 = sampleHeight(uv + vec2f(-texelSize.x, texelSize.y));
-  let d12 = sampleHeight(uv + vec2f(0.0, texelSize.y));
-  let d22 = sampleHeight(uv + vec2f(texelSize.x, texelSize.y));
-  
-  // Sobel operator
-  let dx = (d20 + 2.0 * d21 + d22) - (d00 + 2.0 * d01 + d02);
-  let dy = (d02 + 2.0 * d12 + d22) - (d00 + 2.0 * d10 + d20);
-  
-  // Create normal (x, y components from gradients, z pointing up)
-  // Include parallax depth scale to keep generated normals consistent with displacement magnitude.
-  let slopeScale = uniforms.materialParams.x * uniforms.materialParams.y;
-  return normalize(vec3f(-dx * slopeScale, -dy * slopeScale, 1.0));
+  return lightingCalculateBlinnPhongLight(
+    lightPosition,
+    lightColor,
+    lightParams,
+    N,
+    V,
+    worldPos,
+    albedo,
+    shininess
+  );
 }
 
 @fragment
+// Computes the final fragment color.
+// Combines parallax UV displacement, surface sampling, and Blinn-Phong lighting.
 fn main(input: FragmentInput) -> @location(0) vec4f {
-  // Re-orthonormalize TBN (interpolation can break orthogonality)
-  let N = normalize(input.worldNormal);
-  let T0 = normalize(input.worldTangent);
-  let T = normalize(T0 - N * dot(N, T0));
-  let B0 = normalize(input.worldBitangent);
-  let handedness = select(-1.0, 1.0, dot(cross(N, T), B0) >= 0.0);
-  let B = normalize(cross(N, T) * handedness);
-  let TBN = mat3x3f(T, B, N);
+  let TBN = buildTBN(input.worldNormal, input.worldTangent, input.worldBitangent);
+
+  let params = uniformsGetParallaxParams();
+  let parallax = parallaxComputeResult(input.uv, input.viewDir, TBN, params);
+
+  var albedo = surfaceSampleAlbedo(parallax);
+  albedo = surfaceApplySelfShadow(albedo, parallax.uv, input.viewDir, TBN, params);
+
+  let normalTangent = surfaceGetNormalTangent(parallax, params);
   
-  // Apply parallax mapping
-  let parallaxUVRaw = parallaxMapping(input.uv, input.viewDir, TBN);
-
-  // Edge handling: fade parallax near borders and clamp UV to avoid hard discard holes.
-  let edge = min(min(input.uv.x, 1.0 - input.uv.x), min(input.uv.y, 1.0 - input.uv.y));
-  let parallaxFade = smoothstep(0.0, 0.05, edge);
-  let parallaxUV = mix(input.uv, clamp(parallaxUVRaw, vec2f(0.0), vec2f(1.0)), parallaxFade);
-
-  // Use gradients for better mip selection after UV displacement.
-  let uvDx = dpdx(parallaxUV);
-  let uvDy = dpdy(parallaxUV);
-
-  // Sample albedo texture with parallax-adjusted UV
-  var albedo = textureSampleGrad(albedoTexture, textureSampler, parallaxUV, uvDx, uvDy).rgb;
-
-  // Cheap inner shadow (self-occlusion): darken cavities using the height map.
-  // Applied to albedo only so it mainly affects ambient + diffuse (not specular).
-  let flags = getParallaxFlags();
-  if ((flags & PARALLAX_FLAG_SELF_SHADOW) != 0u) {
-    let strength = getSelfShadowStrength();
-    // View direction in tangent space (grazing angles enhance occlusion)
-    let Vt = normalize(transpose(TBN) * input.viewDir);
-    let grazing = 1.0 - clamp(abs(Vt.z), 0.0, 1.0);
-    let h = sampleHeight(parallaxUV);
-    let cavity = clamp(1.0 - h, 0.0, 1.0);
-    let occlusion = 1.0 - cavity * strength * (0.25 + 0.75 * grazing);
-    albedo *= clamp(occlusion, 0.0, 1.0);
-  }
-  
-  // Get normal from normal map or generate from depth
-  var normalTangent: vec3f;
-  if (u32(uniforms.materialParams.z) != 0u) {
-    // Sample normal map and convert from [0,1] to [-1,1]
-    let normalMapSample = textureSampleGrad(normalTexture, textureSampler, parallaxUV, uvDx, uvDy).rgb;
-    normalTangent = normalize(normalMapSample * 2.0 - 1.0);
-    normalTangent = normalize(vec3f(
-      normalTangent.x * uniforms.materialParams.y,
-      normalTangent.y * uniforms.materialParams.y,
-      normalTangent.z
-    ));
-  } else {
-    let flags = getParallaxFlags();
-    if ((flags & PARALLAX_FLAG_GENERATE_NORMAL_FROM_DEPTH) != 0u) {
-      // Generate normal from depth map
-      let dims = vec2f(textureDimensions(depthTexture, 0));
-      let texelSize = 1.0 / max(dims, vec2f(1.0));
-      normalTangent = generateNormalFromDepth(parallaxUV, texelSize);
-    } else {
-      // Flat tangent-space normal
-      normalTangent = vec3f(0.0, 0.0, 1.0);
-    }
-  }
-  
-  // Transform normal from tangent space to world space
   let normal = normalize(TBN * normalTangent);
   
-  // View direction
   let viewDir = normalize(input.viewDir);
-  let shininess = uniforms.materialParams.w;
+  let shininess = params.shininess;
   
-  // Ambient lighting from uniform
   let ambient = albedo * uniforms.ambientLight.rgb * uniforms.ambientLight.a;
   
-  // Accumulate light contributions
   var Lo = vec3f(0.0);
   let lightCount = i32(uniforms.lightParams.x);
+
+  Lo += lightingAccumulateLight(
+    lightCount > 0,
+    uniforms.light0Position,
+    uniforms.light0Color,
+    uniforms.light0Params,
+    normal,
+    viewDir,
+    input.worldPosition,
+    albedo,
+    shininess
+  );
+
+  Lo += lightingAccumulateLight(
+    lightCount > 1,
+    uniforms.light1Position,
+    uniforms.light1Color,
+    uniforms.light1Params,
+    normal,
+    viewDir,
+    input.worldPosition,
+    albedo,
+    shininess
+  );
+
+  Lo += lightingAccumulateLight(
+    lightCount > 2,
+    uniforms.light2Position,
+    uniforms.light2Color,
+    uniforms.light2Params,
+    normal,
+    viewDir,
+    input.worldPosition,
+    albedo,
+    shininess
+  );
+
+  Lo += lightingAccumulateLight(
+    lightCount > 3,
+    uniforms.light3Position,
+    uniforms.light3Color,
+    uniforms.light3Params,
+    normal,
+    viewDir,
+    input.worldPosition,
+    albedo,
+    shininess
+  );
   
-  // Light 0
-  if (lightCount > 0) {
-    Lo += calculateBlinnPhongLight(
-      uniforms.light0Position,
-      uniforms.light0Color,
-      uniforms.light0Params,
-      normal, viewDir, input.worldPosition, albedo, shininess
-    );
-  }
-  
-  // Light 1
-  if (lightCount > 1) {
-    Lo += calculateBlinnPhongLight(
-      uniforms.light1Position,
-      uniforms.light1Color,
-      uniforms.light1Params,
-      normal, viewDir, input.worldPosition, albedo, shininess
-    );
-  }
-  
-  // Light 2
-  if (lightCount > 2) {
-    Lo += calculateBlinnPhongLight(
-      uniforms.light2Position,
-      uniforms.light2Color,
-      uniforms.light2Params,
-      normal, viewDir, input.worldPosition, albedo, shininess
-    );
-  }
-  
-  // Light 3
-  if (lightCount > 3) {
-    Lo += calculateBlinnPhongLight(
-      uniforms.light3Position,
-      uniforms.light3Color,
-      uniforms.light3Params,
-      normal, viewDir, input.worldPosition, albedo, shininess
-    );
-  }
-  
-  // Combine ambient and direct lighting
   let finalColor = ambient + Lo;
   
   return vec4f(finalColor, 1.0);
