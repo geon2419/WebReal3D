@@ -1,11 +1,27 @@
 import type { Material } from "../material/Material";
 
+/**
+ * Caches render pipelines for materials to avoid rebuilding pipelines every frame.
+ *
+ * @example
+ * ```ts
+ * const pipelines = new PipelineCache({ device, format, sampleCount: 4 });
+ * const pipeline = pipelines.getOrCreate(material);
+ * ```
+ */
 export class PipelineCache {
   private _device: GPUDevice;
   private _format: GPUTextureFormat;
   private _sampleCount: number;
   private _pipelineCache: Map<string, GPURenderPipeline> = new Map();
 
+  /**
+   * Creates a new PipelineCache.
+   * @param options - Construction options
+   * @param options.device - The WebGPU device used to create pipelines
+   * @param options.format - The color attachment format for pipeline targets
+   * @param options.sampleCount - The MSAA sample count used by pipelines
+   */
   constructor(options: {
     device: GPUDevice;
     format: GPUTextureFormat;
@@ -16,6 +32,11 @@ export class PipelineCache {
     this._sampleCount = options.sampleCount;
   }
 
+  /**
+   * Returns a cached pipeline for the material, creating one if needed.
+   * @param material - Material providing shaders, vertex layout, and topology
+   * @returns A GPURenderPipeline configured for the given material
+   */
   getOrCreate(material: Material): GPURenderPipeline {
     const topology = material.getPrimitiveTopology();
     const key = `${material.type}_${topology}`;
@@ -70,6 +91,10 @@ export class PipelineCache {
     return pipeline;
   }
 
+  /**
+   * Clears all cached pipelines.
+   * @returns Nothing
+   */
   clear(): void {
     this._pipelineCache.clear();
   }

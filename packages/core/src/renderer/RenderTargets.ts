@@ -1,5 +1,16 @@
 import type { Color } from "@web-real/math";
 
+/**
+ * Manages the canvas color/depth render targets, including MSAA and resize handling.
+ *
+ * @example
+ * ```ts
+ * const targets = new RenderTargets({ device, context, format, canvas, sampleCount: 4 });
+ * const { passEncoder } = targets.beginRenderPass({ commandEncoder, clearColor });
+ * passEncoder.end();
+ * targets.dispose();
+ * ```
+ */
 export class RenderTargets {
   private _device: GPUDevice;
   private _context: GPUCanvasContext;
@@ -11,6 +22,15 @@ export class RenderTargets {
   private _msaaTexture!: GPUTexture;
   private _resizeObserver: ResizeObserver;
 
+  /**
+   * Creates render targets for a canvas, recreating them on resize.
+   * @param options - Construction options
+   * @param options.device - The WebGPU device used to create textures
+   * @param options.context - The canvas context used to acquire the current swapchain texture
+   * @param options.format - The swapchain color format
+   * @param options.canvas - The target canvas whose size drives texture sizes
+   * @param options.sampleCount - The MSAA sample count for the color/depth targets
+   */
   constructor(options: {
     device: GPUDevice;
     context: GPUCanvasContext;
@@ -35,6 +55,13 @@ export class RenderTargets {
     this._resizeObserver.observe(this._canvas);
   }
 
+  /**
+   * Begins a render pass targeting the current swapchain texture.
+   * @param options - Render pass options
+   * @param options.commandEncoder - Command encoder used to begin the pass
+   * @param options.clearColor - Clear color used for the color attachment
+   * @returns The created render pass encoder
+   */
   beginRenderPass(options: {
     commandEncoder: GPUCommandEncoder;
     clearColor: Color;
@@ -69,6 +96,10 @@ export class RenderTargets {
     };
   }
 
+  /**
+   * Destroys owned textures and disconnects the resize observer.
+   * @returns Nothing
+   */
   dispose(): void {
     this._resizeObserver.disconnect();
 

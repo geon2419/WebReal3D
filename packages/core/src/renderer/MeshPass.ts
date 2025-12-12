@@ -6,11 +6,27 @@ import type { Scene } from "../scene/Scene";
 import { MeshResourceCache } from "./MeshResourceCache";
 import { PipelineCache } from "./PipelineCache";
 
+/**
+ * Renders scene meshes into a render pass using cached pipelines and GPU resources.
+ *
+ * @example
+ * ```ts
+ * const meshPass = new MeshPass({ device, pipelines, meshResources });
+ * meshPass.render({ passEncoder, meshes, lights, scene, camera });
+ * ```
+ */
 export class MeshPass {
   private _device: GPUDevice;
   private _pipelines: PipelineCache;
   private _meshResources: MeshResourceCache;
 
+  /**
+   * Creates a new MeshPass.
+   * @param options - Construction options
+   * @param options.device - The WebGPU device used for buffer updates
+   * @param options.pipelines - Pipeline cache used to get or create material pipelines
+   * @param options.meshResources - Mesh resource cache used to get or create GPU buffers/bind groups
+   */
   constructor(options: {
     device: GPUDevice;
     pipelines: PipelineCache;
@@ -21,6 +37,16 @@ export class MeshPass {
     this._meshResources = options.meshResources;
   }
 
+  /**
+   * Draws the provided meshes using their materials, camera matrices, and scene lights.
+   * @param options - Render options
+   * @param options.passEncoder - Active render pass encoder to record draw commands into
+   * @param options.meshes - Meshes to render
+   * @param options.lights - Lights to include in the material render context
+   * @param options.scene - Scene used for material render context
+   * @param options.camera - Camera providing view/projection matrices
+   * @returns Nothing
+   */
   render(options: {
     passEncoder: GPURenderPassEncoder;
     meshes: Mesh[];

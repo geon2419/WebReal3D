@@ -3,6 +3,9 @@ import { PBRMaterial } from "../material/PBRMaterial";
 import type { Mesh } from "../scene/Mesh";
 import { FallbackResources } from "./FallbackResources";
 
+/**
+ * GPU resources created for a mesh, including buffers and bind groups.
+ */
 export interface MeshGPUResources {
   vertexBuffer: GPUBuffer;
   indexBuffer: GPUBuffer;
@@ -16,6 +19,16 @@ export interface MeshGPUResources {
   indexFormat: GPUIndexFormat;
 }
 
+/**
+ * Caches per-mesh GPU buffers and bind groups, recreating them when mesh/material changes.
+ *
+ * @example
+ * ```ts
+ * const meshResources = new MeshResourceCache({ device, fallback });
+ * const resources = meshResources.getOrCreate(mesh, pipeline);
+ * // passEncoder.setBindGroup(0, resources.bindGroup);
+ * ```
+ */
 export class MeshResourceCache {
   private _device: GPUDevice;
   private _fallback: FallbackResources;
@@ -23,11 +36,23 @@ export class MeshResourceCache {
   private _meshBuffers: WeakMap<Mesh, MeshGPUResources> = new WeakMap();
   private _trackedMeshResources: Set<MeshGPUResources> = new Set();
 
+  /**
+   * Creates a new MeshResourceCache.
+   * @param options - Construction options
+   * @param options.device - The WebGPU device used to create buffers and bind groups
+   * @param options.fallback - Fallback textures/samplers used when optional resources are missing
+   */
   constructor(options: { device: GPUDevice; fallback: FallbackResources }) {
     this._device = options.device;
     this._fallback = options.fallback;
   }
 
+  /**
+   * Returns cached GPU resources for the mesh, creating or updating them as needed.
+   * @param mesh - Mesh providing geometry, indices, and material bindings
+   * @param pipeline - Pipeline used to query bind group layouts
+   * @returns Cached or newly created GPU resources for the mesh
+   */
   getOrCreate(mesh: Mesh, pipeline: GPURenderPipeline): MeshGPUResources {
     let resources = this._meshBuffers.get(mesh);
     const currentMaterialType = mesh.material.type;
@@ -273,6 +298,11 @@ export class MeshResourceCache {
     return resources;
   }
 
+  /**
+   * Disposes GPU resources associated with a specific mesh.
+   * @param mesh - Mesh whose cached resources should be destroyed
+   * @returns Nothing
+   */
   disposeMesh(mesh: Mesh): void {
     const resources = this._meshBuffers.get(mesh);
     if (!resources) return;
@@ -281,6 +311,10 @@ export class MeshResourceCache {
     this._meshBuffers.delete(mesh);
   }
 
+  /**
+   * Disposes all tracked mesh GPU resources.
+   * @returns Nothing
+   */
   disposeAll(): void {
     for (const resources of this._trackedMeshResources) {
       resources.vertexBuffer.destroy();

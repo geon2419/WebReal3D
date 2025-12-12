@@ -11,6 +11,16 @@ import { PipelineCache } from "./PipelineCache";
 import { RenderTargets } from "./RenderTargets";
 import { SkyboxPass } from "./SkyboxPass";
 
+/**
+ * Renders a scene to the engine canvas using WebGPU.
+ *
+ * @example
+ * ```ts
+ * const renderer = new Renderer(engine);
+ * renderer.setClearColor([0.1, 0.1, 0.1, 1]);
+ * renderer.render(scene, camera);
+ * ```
+ */
 export class Renderer {
   private engine: Engine;
   private clearColor: Color = new Color(0.1, 0.1, 0.1, 1.0);
@@ -23,6 +33,10 @@ export class Renderer {
   private _meshPass: MeshPass;
   private _skyboxPass: SkyboxPass;
 
+  /**
+   * Creates a new renderer for an engine instance.
+   * @param engine - Engine providing the device, canvas context, and swapchain format
+   */
   constructor(engine: Engine) {
     this.engine = engine;
 
@@ -73,6 +87,11 @@ export class Renderer {
     return this.engine.format;
   }
 
+  /**
+   * Sets the clear color for the next renders.
+   * @param color - Clear color as a Color or RGB/RGBA tuple (0..1)
+   * @returns This renderer for chaining
+   */
   setClearColor(
     color: Color | [number, number, number] | [number, number, number, number]
   ): this {
@@ -80,6 +99,12 @@ export class Renderer {
     return this;
   }
 
+  /**
+   * Renders the scene from the given camera.
+   * @param scene - Scene containing meshes, lights, and an optional skybox material
+   * @param camera - Camera defining the view and projection
+   * @returns Nothing
+   */
   render(scene: Scene, camera: Camera): void {
     scene.updateMatrixWorld();
     camera.updateWorldMatrix(false, false);
@@ -116,6 +141,10 @@ export class Renderer {
     this.device.queue.submit([commandEncoder.finish()]);
   }
 
+  /**
+   * Disposes all GPU resources owned by the renderer.
+   * @returns Nothing
+   */
   dispose(): void {
     this._renderTargets.dispose();
     this._meshResources.disposeAll();
@@ -124,6 +153,11 @@ export class Renderer {
     this._fallback.dispose();
   }
 
+  /**
+   * Disposes GPU resources associated with a specific mesh.
+   * @param mesh - Mesh to remove from internal caches
+   * @returns Nothing
+   */
   disposeMesh(mesh: Mesh): void {
     this._meshResources.disposeMesh(mesh);
   }

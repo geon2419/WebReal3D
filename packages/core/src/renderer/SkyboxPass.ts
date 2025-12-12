@@ -11,6 +11,15 @@ interface SkyboxGPUResources {
   bindingRevision: number;
 }
 
+/**
+ * Renders a skybox using a fullscreen triangle and a dedicated skybox pipeline.
+ *
+ * @example
+ * ```ts
+ * const skyboxPass = new SkyboxPass({ device, format, sampleCount: 4, fallback });
+ * skyboxPass.render(passEncoder, skyboxMaterial, camera);
+ * ```
+ */
 export class SkyboxPass {
   private _device: GPUDevice;
   private _format: GPUTextureFormat;
@@ -19,6 +28,14 @@ export class SkyboxPass {
 
   private _resources?: SkyboxGPUResources;
 
+  /**
+   * Creates a new SkyboxPass.
+   * @param options - Construction options
+   * @param options.device - The WebGPU device used to create pipelines and buffers
+   * @param options.format - The color attachment format for the skybox pipeline
+   * @param options.sampleCount - The MSAA sample count used by the skybox pipeline
+   * @param options.fallback - Fallback resources used when optional cube textures are missing
+   */
   constructor(options: {
     device: GPUDevice;
     format: GPUTextureFormat;
@@ -31,6 +48,13 @@ export class SkyboxPass {
     this._fallback = options.fallback;
   }
 
+  /**
+   * Draws the skybox using the provided material and camera.
+   * @param passEncoder - Active render pass encoder to record draw commands into
+   * @param material - Skybox material providing shaders and textures
+   * @param camera - Camera used to build skybox uniforms
+   * @returns Nothing
+   */
   render(
     passEncoder: GPURenderPassEncoder,
     material: SkyboxMaterial,
@@ -54,6 +78,10 @@ export class SkyboxPass {
     passEncoder.draw(3);
   }
 
+  /**
+   * Releases any cached GPU resources owned by this pass.
+   * @returns Nothing
+   */
   dispose(): void {
     if (this._resources) {
       this._resources.uniformBuffer.destroy();
