@@ -266,16 +266,17 @@ export class SkyboxMaterial implements Material {
     buffer.setFloat32(paramsOffset, this._exposure, true);
     buffer.setFloat32(paramsOffset + 4, this._roughness, true);
 
-    // Calculate maxMipLevel
-    let maxMipLevel = 0;
+    // Calculate maximum mip level index (mipCount - 1)
+    // e.g. width=1024 => mipCount=11 (levels 0..10) => max index = 10
+    let maxMipLevelIndex = 0;
     if (this._cubeMap) {
-      maxMipLevel = this._cubeMap.mipLevelCount - 1;
+      maxMipLevelIndex = this._cubeMap.mipLevelCount - 1;
     } else if (this._equirectangularMap) {
       // Estimate mip levels from texture size
       const width = this._equirectangularMap.width;
-      maxMipLevel = Math.floor(Math.log2(width));
+      maxMipLevelIndex = Math.floor(Math.log2(width));
     }
-    buffer.setFloat32(paramsOffset + 8, maxMipLevel, true);
+    buffer.setFloat32(paramsOffset + 8, maxMipLevelIndex, true);
 
     // Map mode: 0 = equirectangular, 1 = cubemap
     const mapMode = this._cubeMap ? 1.0 : 0.0;
