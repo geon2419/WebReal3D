@@ -239,4 +239,331 @@ describe("ParallaxMaterial", () => {
       expect(shader.length).toBeGreaterThan(0);
     });
   });
+
+  describe("getTextures", () => {
+    it("should return albedo, depth, and normal textures when all provided", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+        normal: normalTexture,
+      });
+      const mockDevice = {} as GPUDevice;
+      const textures = material.getTextures(mockDevice);
+
+      expect(textures).toHaveLength(3);
+      expect(textures[0]).toBe(albedoTexture);
+      expect(textures[1]).toBe(depthTexture);
+      expect(textures[2]).toBe(normalTexture);
+    });
+
+    it("should create dummy normal texture when not provided", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      // Mock WebGPU globals
+      (globalThis as any).GPUTextureUsage = {
+        TEXTURE_BINDING: 0x04,
+        COPY_DST: 0x08,
+        RENDER_ATTACHMENT: 0x10,
+      };
+
+      const mockTexture = createMockTexture();
+      const mockDevice = {
+        createTexture: () => ({} as GPUTexture),
+        createSampler: () => ({} as GPUSampler),
+        queue: {
+          writeTexture: () => {},
+        },
+      } as unknown as GPUDevice;
+
+      const textures = material.getTextures(mockDevice);
+
+      expect(textures).toHaveLength(3);
+      expect(textures[0]).toBe(albedoTexture);
+      expect(textures[1]).toBe(depthTexture);
+      expect(textures[2]).toBeInstanceOf(Texture);
+
+      delete (globalThis as any).GPUTextureUsage;
+    });
+
+    it("should throw error when no normal texture and no device provided", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      expect(() => material.getTextures()).toThrow(
+        "ParallaxMaterial.getTextures() requires a GPUDevice parameter when no normal texture is provided"
+      );
+    });
+  });
+
+  describe("writeUniformData with rendering context", () => {
+    it("should write camera position from world matrix", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const mockCamera = {
+        worldMatrix: {
+          data: new Float32Array([
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 10, 15, 1,
+          ]),
+        },
+      };
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { camera: mockCamera } as any);
+
+      // Camera position at offset+64 (64+64=128)
+      expect(dataView.getFloat32(128, true)).toBe(5);
+      expect(dataView.getFloat32(132, true)).toBe(10);
+      expect(dataView.getFloat32(136, true)).toBe(15);
+    });
+
+    it("should write model matrix from mesh", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const testMatrix = new Float32Array(16);
+      for (let i = 0; i < 16; i++) {
+        testMatrix[i] = i + 1;
+      }
+
+      const mockMesh = {
+        worldMatrix: { data: testMatrix },
+      };
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { mesh: mockMesh } as any);
+
+      // Model matrix at offset+0
+      for (let i = 0; i < 16; i++) {
+        expect(dataView.getFloat32(64 + i * 4, true)).toBe(i + 1);
+      }
+    });
+
+    it("should write AmbientLight when provided", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const { AmbientLight } = require("../light/AmbientLight");
+      const { Color } = require("@web-real/math");
+      const ambient = new AmbientLight(new Color(0.5, 0.6, 0.7), 0.8);
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { lights: [ambient] } as any);
+
+      // Ambient light at offset+96 (64+96=160)
+      expect(dataView.getFloat32(160, true)).toBeCloseTo(0.5);
+      expect(dataView.getFloat32(164, true)).toBeCloseTo(0.6);
+      expect(dataView.getFloat32(168, true)).toBeCloseTo(0.7);
+      expect(dataView.getFloat32(172, true)).toBeCloseTo(0.8);
+    });
+
+    it("should write PointLight data correctly", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const { PointLight } = require("../light/PointLight");
+      const { Color } = require("@web-real/math");
+      const pointLight = new PointLight(
+        new Color(1, 0, 0),
+        2.0,
+        15,
+        "quadratic"
+      );
+      pointLight.position.set(3, 4, 5);
+      pointLight.updateWorldMatrix(true, false);
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { lights: [pointLight] } as any);
+
+      // Light count at offset+112 (64+112=176)
+      expect(dataView.getFloat32(176, true)).toBe(1);
+
+      // First light at offset+128 (64+128=192)
+      // Position
+      expect(dataView.getFloat32(192, true)).toBeCloseTo(3);
+      expect(dataView.getFloat32(196, true)).toBeCloseTo(4);
+      expect(dataView.getFloat32(200, true)).toBeCloseTo(5);
+
+      // Color + intensity
+      expect(dataView.getFloat32(208, true)).toBe(1);
+      expect(dataView.getFloat32(212, true)).toBe(0);
+      expect(dataView.getFloat32(216, true)).toBe(0);
+      expect(dataView.getFloat32(220, true)).toBe(2);
+
+      // Light type: 1.0 = point
+      expect(dataView.getFloat32(224, true)).toBe(1);
+    });
+
+    it("should write DirectionalLight data correctly", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const { DirectionalLight } = require("../light/DirectionalLight");
+      const { Color, Vector3 } = require("@web-real/math");
+      const dirLight = new DirectionalLight(
+        new Vector3(0, -1, 0),
+        new Color(1, 1, 0.8),
+        1.5
+      );
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { lights: [dirLight] } as any);
+
+      // Light count
+      expect(dataView.getFloat32(176, true)).toBe(1);
+
+      // First light at offset+128 (64+128=192)
+      // Direction (stored in position slot)
+      expect(dataView.getFloat32(192, true)).toBeCloseTo(0);
+      expect(dataView.getFloat32(196, true)).toBeCloseTo(-1);
+      expect(dataView.getFloat32(200, true)).toBeCloseTo(0);
+
+      // Color + intensity
+      expect(dataView.getFloat32(208, true)).toBe(1);
+      expect(dataView.getFloat32(212, true)).toBe(1);
+      expect(dataView.getFloat32(216, true)).toBeCloseTo(0.8);
+      expect(dataView.getFloat32(220, true)).toBeCloseTo(1.5);
+
+      // Light type: 0.0 = directional
+      expect(dataView.getFloat32(224, true)).toBe(0);
+    });
+
+    it("should handle multiple lights up to 4", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const { PointLight } = require("../light/PointLight");
+      const { DirectionalLight } = require("../light/DirectionalLight");
+      const { AmbientLight } = require("../light/AmbientLight");
+      const { Color, Vector3 } = require("@web-real/math");
+
+      const lights = [
+        new AmbientLight(new Color(0.2, 0.2, 0.2), 0.3),
+        new PointLight(new Color(1, 0, 0), 1.0),
+        new DirectionalLight(new Vector3(0, -1, 0), new Color(1, 1, 1), 1.0),
+        new PointLight(new Color(0, 1, 0), 1.0),
+      ];
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { lights } as any);
+
+      // Should count 3 lights (excluding ambient)
+      expect(dataView.getFloat32(176, true)).toBe(3);
+
+      // First light type (PointLight)
+      expect(dataView.getFloat32(224, true)).toBe(1);
+
+      // Second light type (DirectionalLight)
+      expect(dataView.getFloat32(224 + 48, true)).toBe(0);
+
+      // Third light type (PointLight)
+      expect(dataView.getFloat32(224 + 96, true)).toBe(1);
+    });
+
+    it("should limit to 4 lights maximum", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      const { PointLight } = require("../light/PointLight");
+      const { Color } = require("@web-real/math");
+
+      const lights = Array.from(
+        { length: 6 },
+        () => new PointLight(new Color(1, 1, 1), 1.0)
+      );
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64, { lights } as any);
+
+      // Should only write 4 lights
+      expect(dataView.getFloat32(176, true)).toBe(4);
+    });
+
+    it("should write correct feature flags", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+        invertHeight: true,
+        generateNormalFromDepth: true,
+        selfShadow: true,
+      });
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64);
+
+      // Feature flags at offset+124 (64+124=188)
+      // Flags: bit0=invertHeight, bit1=generateNormalFromDepth, bit2=selfShadow
+      // Expected: 1 | 2 | 4 = 7
+      expect(dataView.getFloat32(188, true)).toBe(7);
+    });
+
+    it("should write selfShadowStrength when enabled", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+        selfShadow: true,
+        selfShadowStrength: 0.6,
+      });
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64);
+
+      // Self-shadow strength at offset+116 (64+116=180)
+      expect(dataView.getFloat32(180, true)).toBeCloseTo(0.6);
+    });
+
+    it("should write 0 selfShadowStrength when disabled", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+        selfShadow: false,
+        selfShadowStrength: 0.6,
+      });
+
+      const buffer = new ArrayBuffer(material.getUniformBufferSize());
+      const dataView = new DataView(buffer);
+
+      material.writeUniformData(dataView, 64);
+
+      // Should be 0 when selfShadow is disabled
+      expect(dataView.getFloat32(180, true)).toBe(0);
+    });
+  });
 });
