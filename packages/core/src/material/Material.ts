@@ -36,6 +36,16 @@ export interface Material {
   readonly type: string;
 
   /**
+   * Revision used to invalidate cached GPU bindings (bind groups) when
+   * texture/sampler resources change without changing material.type/topology.
+   *
+   * - If omitted, Renderer treats it as 0.
+   * - If a material mutates its bound resources (e.g., swapping textures),
+   *   it should increment this value.
+   */
+  readonly bindingRevision?: number;
+
+  /**
    * Gets the vertex shader code for this material.
    * @returns WGSL shader code as a string
    */
@@ -58,6 +68,19 @@ export interface Material {
    * @returns Size in bytes
    */
   getUniformBufferSize(): number;
+
+  /**
+   * Absolute byte offset where material-specific uniforms begin in the uniform buffer.
+   *
+   * Renderer convention:
+   * - 0..64: renderer-owned common block (typically MVP mat4x4f)
+   * - offset..: material-specific block written by writeUniformData()
+   *
+   * Policy:
+   * - If provided, this must be >= 64.
+   * - If omitted, Renderer defaults to 64.
+   */
+  getUniformDataOffset?(): number;
 
   /**
    * Gets the primitive topology for rendering.

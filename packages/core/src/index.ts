@@ -59,6 +59,7 @@ export {
   type TextureOptions,
   SamplerPresets,
   DEFAULT_SAMPLER_OPTIONS,
+  SamplerCache,
   MipmapGenerator,
   calculateMipLevelCount,
   isRenderableFormat,

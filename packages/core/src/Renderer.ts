@@ -8,6 +8,7 @@ import { SkyboxMaterial } from "./material/SkyboxMaterial";
 import { Mesh } from "./scene/Mesh";
 import { Light } from "./light/Light";
 import { getIndexFormat } from "./geometry/Geometry";
+import { SamplerCache } from "./texture/SamplerCache";
 
 interface MeshGPUResources {
   vertexBuffer: GPUBuffer;
@@ -17,6 +18,7 @@ interface MeshGPUResources {
   iblBindGroup?: GPUBindGroup;
   materialType: string;
   topology: GPUPrimitiveTopology;
+  bindingRevision: number;
   indexCount: number;
   indexFormat: GPUIndexFormat;
 }
@@ -51,7 +53,7 @@ export class Renderer {
 
   private pipelineCache: Map<string, GPURenderPipeline> = new Map();
   private meshBuffers: WeakMap<Mesh, MeshGPUResources> = new WeakMap();
-  private trackedMeshes: Set<Mesh> = new Set();
+  private trackedMeshResources: Set<MeshGPUResources> = new Set();
 
   // Skybox rendering resources
   private skyboxResources?: SkyboxGPUResources;
@@ -59,6 +61,7 @@ export class Renderer {
   // Dummy textures for IBL bind group when IBL is not used
   private _dummyCubeTexture?: GPUTexture;
   private _dummyBrdfLUT?: GPUTexture;
+  private _samplerCache: SamplerCache = new SamplerCache();
 
   /**
    * Creates a new Renderer instance with 4x MSAA and depth buffering.
@@ -150,6 +153,13 @@ export class Renderer {
     return this._dummyBrdfLUT;
   }
 
+  private destroyMeshResources(resources: MeshGPUResources): void {
+    resources.vertexBuffer.destroy();
+    resources.indexBuffer.destroy();
+    resources.uniformBuffer.destroy();
+    this.trackedMeshResources.delete(resources);
+  }
+
   /**
    * Gets or creates a render pipeline for the given material with caching.
    * @param material - The material defining shaders and rendering configuration
@@ -227,6 +237,7 @@ export class Renderer {
     let resources = this.meshBuffers.get(mesh);
     const currentMaterialType = mesh.material.type;
     const currentTopology = mesh.material.getPrimitiveTopology();
+    const currentBindingRevision = mesh.material.bindingRevision ?? 0;
 
     // Invalidate resources if material type, topology changed, or mesh needs update
     if (
@@ -235,11 +246,100 @@ export class Renderer {
         resources.topology !== currentTopology ||
         mesh.needsUpdate)
     ) {
-      resources.vertexBuffer.destroy();
-      resources.indexBuffer.destroy();
-      resources.uniformBuffer.destroy();
+      this.destroyMeshResources(resources);
       resources = undefined;
       mesh.needsUpdate = false;
+    }
+
+    // If only bindings changed (textures/samplers/IBL), rebuild bind groups only.
+    if (resources && resources.bindingRevision !== currentBindingRevision) {
+      // Rebuild group(0) bind group
+      const uniformBuffer = resources.uniformBuffer;
+
+      const bindGroupEntries: GPUBindGroupEntry[] = [
+        {
+          binding: 0,
+          resource: { buffer: uniformBuffer },
+        },
+      ];
+
+      if (mesh.material.getTextures) {
+        const textures = mesh.material.getTextures(this.device);
+        if (textures.length > 0) {
+          bindGroupEntries.push({
+            binding: 1,
+            resource: textures[0].gpuSampler,
+          });
+          textures.forEach((texture, index) => {
+            bindGroupEntries.push({
+              binding: 2 + index,
+              resource: texture.gpuTexture.createView(),
+            });
+          });
+        }
+      }
+
+      resources.bindGroup = this.device.createBindGroup({
+        label: "Mesh Bind Group",
+        layout: pipeline.getBindGroupLayout(0),
+        entries: bindGroupEntries,
+      });
+
+      // Rebuild group(1) IBL bind group for PBR materials (if applicable)
+      if (mesh.material instanceof PBRMaterial) {
+        const iblTextures = mesh.material.getIBLTextures(this.device);
+
+        if (iblTextures) {
+          resources.iblBindGroup = this.device.createBindGroup({
+            label: "IBL Bind Group",
+            layout: pipeline.getBindGroupLayout(1),
+            entries: [
+              {
+                binding: 0,
+                resource: iblTextures.prefilteredMap.gpuSampler,
+              },
+              {
+                binding: 1,
+                resource: iblTextures.prefilteredMap.cubeView,
+              },
+              {
+                binding: 2,
+                resource: iblTextures.irradianceMap.cubeView,
+              },
+              {
+                binding: 3,
+                resource: iblTextures.brdfLUT.gpuTexture.createView(),
+              },
+            ],
+          });
+        } else {
+          const dummyCube = this.getDummyCubeTexture();
+          const dummyBrdf = this.getDummyBrdfLUT();
+          const dummySampler = this._samplerCache.get(this.device, {
+            magFilter: "linear",
+            minFilter: "linear",
+          });
+
+          resources.iblBindGroup = this.device.createBindGroup({
+            label: "Dummy IBL Bind Group",
+            layout: pipeline.getBindGroupLayout(1),
+            entries: [
+              { binding: 0, resource: dummySampler },
+              {
+                binding: 1,
+                resource: dummyCube.createView({ dimension: "cube" }),
+              },
+              {
+                binding: 2,
+                resource: dummyCube.createView({ dimension: "cube" }),
+              },
+              { binding: 3, resource: dummyBrdf.createView() },
+            ],
+          });
+        }
+      }
+
+      resources.bindingRevision = currentBindingRevision;
     }
 
     if (!resources) {
@@ -350,7 +450,7 @@ export class Renderer {
           // No IBL textures - create dummy bind group to satisfy shader requirements
           const dummyCube = this.getDummyCubeTexture();
           const dummyBrdf = this.getDummyBrdfLUT();
-          const dummySampler = this.device.createSampler({
+          const dummySampler = this._samplerCache.get(this.device, {
             magFilter: "linear",
             minFilter: "linear",
           });
@@ -388,11 +488,12 @@ export class Renderer {
         iblBindGroup,
         materialType: currentMaterialType,
         topology: currentTopology,
+        bindingRevision: currentBindingRevision,
         indexCount: indexData.length,
         indexFormat,
       };
       this.meshBuffers.set(mesh, resources);
-      this.trackedMeshes.add(mesh);
+      this.trackedMeshResources.add(resources);
     }
 
     return resources;
@@ -679,17 +780,25 @@ export class Renderer {
             : new ArrayBuffer(material.getUniformBufferSize());
         const dataView = new DataView(uniformData);
 
+        const uniformDataOffset = material.getUniformDataOffset?.() ?? 64;
+        if (uniformDataOffset < 64) {
+          throw new Error(
+            `Material.getUniformDataOffset() must be >= 64 (got ${uniformDataOffset})`
+          );
+        }
+
         // Call material's writeUniformData method
-        material.writeUniformData(dataView, 64, renderContext);
+        material.writeUniformData(dataView, uniformDataOffset, renderContext);
 
         // Write the uniform data to GPU (starting at offset 64, after MVP)
-        const customDataSize = material.getUniformBufferSize() - 64;
+        const customDataSize =
+          material.getUniformBufferSize() - uniformDataOffset;
         if (customDataSize > 0) {
           this.device.queue.writeBuffer(
             resources.uniformBuffer,
-            64,
+            uniformDataOffset,
             uniformData,
-            64, // source offset - read from offset 64 where material wrote its data
+            uniformDataOffset, // source offset - read from offset where material wrote its data
             customDataSize // size to copy
           );
         }
@@ -736,15 +845,24 @@ export class Renderer {
       this.msaaTexture.destroy();
     }
 
-    for (const mesh of this.trackedMeshes) {
-      const resources = this.meshBuffers.get(mesh);
-      if (resources) {
-        resources.vertexBuffer.destroy();
-        resources.indexBuffer.destroy();
-        resources.uniformBuffer.destroy();
-      }
+    for (const resources of this.trackedMeshResources) {
+      resources.vertexBuffer.destroy();
+      resources.indexBuffer.destroy();
+      resources.uniformBuffer.destroy();
     }
-    this.trackedMeshes.clear();
+    this.trackedMeshResources.clear();
     this.pipelineCache.clear();
+  }
+
+  /**
+   * Explicitly releases cached GPU resources for a mesh.
+   * Recommended when removing meshes dynamically to avoid retaining GPU buffers.
+   */
+  disposeMesh(mesh: Mesh): void {
+    const resources = this.meshBuffers.get(mesh);
+    if (!resources) return;
+
+    this.destroyMeshResources(resources);
+    this.meshBuffers.delete(mesh);
   }
 }
