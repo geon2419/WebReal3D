@@ -39,6 +39,8 @@ describe("ParallaxMaterial", () => {
       expect(material.normalScale).toBe(1.0);
       expect(material.shininess).toBe(32.0);
       expect(material.generateNormalFromDepth).toBe(true);
+      expect(material.selfShadow).toBe(false);
+      expect(material.selfShadowStrength).toBe(0.35);
     });
 
     it("should initialize with custom values", () => {
@@ -50,12 +52,29 @@ describe("ParallaxMaterial", () => {
         normalScale: 1.5,
         shininess: 64.0,
         generateNormalFromDepth: false,
+        selfShadow: true,
+        selfShadowStrength: 0.8,
       });
       expect(material.normal).toBe(normalTexture);
       expect(material.depthScale).toBe(0.08);
       expect(material.normalScale).toBe(1.5);
       expect(material.shininess).toBe(64.0);
       expect(material.generateNormalFromDepth).toBe(false);
+      expect(material.selfShadow).toBe(true);
+      expect(material.selfShadowStrength).toBe(0.8);
+    });
+
+    it("should allow toggling selfShadow at runtime", () => {
+      const material = new ParallaxMaterial({
+        albedo: albedoTexture,
+        depth: depthTexture,
+      });
+
+      expect(material.selfShadow).toBe(false);
+      material.selfShadow = true;
+      expect(material.selfShadow).toBe(true);
+      material.selfShadow = false;
+      expect(material.selfShadow).toBe(false);
     });
 
     it("should have correct type", () => {

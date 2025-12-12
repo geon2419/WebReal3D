@@ -18,6 +18,17 @@ export interface ParallaxMaterialOptions {
   /** @default true */
   generateNormalFromDepth?: boolean;
   /**
+   * Cheap self-occlusion ("inner shadow") using the height map.
+   * This is a low-cost approximation that darkens cavities.
+   * @default false
+   */
+  selfShadow?: boolean;
+  /**
+   * Strength of the self-shadow effect.
+   * @default 0.35
+   */
+  selfShadowStrength?: number;
+  /**
    * Height sampling convention for the depth texture.
    * When true, height = 1 - depth.r (preserves current behavior).
    * @default true
@@ -48,7 +59,9 @@ export class ParallaxMaterial implements Material {
   private _depthScale: number;
   private _normalScale: number;
   private _shininess: number;
+  private _selfShadowStrength: number;
   readonly generateNormalFromDepth: boolean;
+  private _selfShadow: boolean;
   readonly invertHeight: boolean;
   private static _dummyNormalTexture?: Texture;
 
@@ -64,6 +77,8 @@ export class ParallaxMaterial implements Material {
     this._normalScale = options.normalScale ?? 1.0;
     this._shininess = options.shininess ?? 32.0;
     this.generateNormalFromDepth = options.generateNormalFromDepth ?? true;
+    this._selfShadow = options.selfShadow ?? false;
+    this._selfShadowStrength = options.selfShadowStrength ?? 0.35;
     this.invertHeight = options.invertHeight ?? true;
 
     // Validate depth scale range
@@ -84,6 +99,13 @@ export class ParallaxMaterial implements Material {
     if (this._shininess < 1 || this._shininess > 256) {
       console.warn(
         `ParallaxMaterial: shininess ${this._shininess} is outside recommended range (1-256)`
+      );
+    }
+
+    // Validate self-shadow strength range
+    if (this._selfShadowStrength < 0 || this._selfShadowStrength > 1) {
+      console.warn(
+        `ParallaxMaterial: selfShadowStrength ${this._selfShadowStrength} is outside recommended range (0-1)`
       );
     }
   }
@@ -146,6 +168,40 @@ export class ParallaxMaterial implements Material {
       );
     }
     this._shininess = value;
+  }
+
+  /**
+   * Gets whether cheap self-shadow (inner shadow) is enabled.
+   */
+  get selfShadow(): boolean {
+    return this._selfShadow;
+  }
+
+  /**
+   * Enables/disables cheap self-shadow (inner shadow).
+   */
+  set selfShadow(value: boolean) {
+    this._selfShadow = value;
+  }
+
+  /**
+   * Gets the self-shadow strength.
+   */
+  get selfShadowStrength(): number {
+    return this._selfShadowStrength;
+  }
+
+  /**
+   * Sets the self-shadow strength.
+   * @param value - Strength value in [0, 1]
+   */
+  set selfShadowStrength(value: number) {
+    if (value < 0 || value > 1) {
+      console.warn(
+        `ParallaxMaterial: selfShadowStrength ${value} is outside recommended range (0-1)`
+      );
+    }
+    this._selfShadowStrength = value;
   }
 
   /**
@@ -398,14 +454,21 @@ export class ParallaxMaterial implements Material {
     lightCount: number
   ): void {
     buffer.setFloat32(offset + 112, lightCount, true);
-    buffer.setFloat32(offset + 116, 0, true); // reserved
+    // y: self-shadow strength (cheap inner shadow)
+    buffer.setFloat32(
+      offset + 116,
+      this.selfShadow ? this.selfShadowStrength : 0,
+      true
+    );
     buffer.setFloat32(offset + 120, 0, true); // reserved
     // reserved: pack parallax feature flags into lightParams.w (as float, decoded as u32 in WGSL)
     // bit0: invertHeight (height = 1 - depth.r)
     // bit1: generateNormalFromDepth
+    // bit2: selfShadow (cheap inner shadow)
     let flags = 0;
     if (this.invertHeight) flags |= 1;
     if (this.generateNormalFromDepth) flags |= 2;
+    if (this.selfShadow) flags |= 4;
     buffer.setFloat32(offset + 124, flags, true);
   }
 

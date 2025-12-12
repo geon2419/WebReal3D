@@ -37,10 +37,16 @@ struct FragmentInput {
 
 const PARALLAX_FLAG_INVERT_HEIGHT: u32 = 1u;
 const PARALLAX_FLAG_GENERATE_NORMAL_FROM_DEPTH: u32 = 2u;
+const PARALLAX_FLAG_SELF_SHADOW: u32 = 4u;
 
 fn getParallaxFlags() -> u32 {
   // Stored as float in uniforms.lightParams.w
   return u32(uniforms.lightParams.w);
+}
+
+fn getSelfShadowStrength() -> f32 {
+  // Stored in uniforms.lightParams.y
+  return clamp(uniforms.lightParams.y, 0.0, 1.0);
 }
 
 fn sampleHeight(uv: vec2f) -> f32 {
@@ -121,17 +127,34 @@ fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
   
   // Number of layers for steep parallax
   let minLayers = 8.0;
-  let maxLayers = 32.0;
-  let numLayers = mix(maxLayers, minLayers, abs(dot(vec3f(0.0, 0.0, 1.0), viewDirTangent)));
-  
-  // Calculate the size of each layer
-  let layerDepth = 1.0 / numLayers;
-  var currentLayerDepth = 0.0;
+  let maxLayers = 64.0;
+  let viewZ = abs(dot(vec3f(0.0, 0.0, 1.0), viewDirTangent));
+  let layersFromAngle = mix(maxLayers, minLayers, viewZ);
   
   // The amount to shift the texture coordinates per layer
   // Divide by z to stabilize the effect at grazing angles.
-  let vz = max(viewDirTangent.z, 1e-3);
-  let P = (viewDirTangent.xy / vz) * uniforms.materialParams.x;
+  // Additionally:
+  // - Fade parallax at very grazing angles to avoid "tearing" artifacts.
+  // - Clamp max offset to prevent UV displacement from exploding.
+  let vzAbs = abs(viewDirTangent.z);
+  let angleFade = smoothstep(0.12, 0.35, vzAbs);
+  let vz = max(vzAbs, 0.08);
+  let baseP = (viewDirTangent.xy / vz) * uniforms.materialParams.x;
+  // Increase layer count when displacement is large (helps reduce stepping/tearing).
+  let layersFromOffset = clamp(minLayers + length(baseP) * 24.0, minLayers, maxLayers);
+  let numLayers = max(layersFromAngle, layersFromOffset);
+
+  // Calculate the size of each layer
+  let layerDepth = 1.0 / numLayers;
+  var currentLayerDepth = 0.0;
+
+  var P = baseP;
+  let maxOffset = 0.08;
+  let pLen = length(P);
+  if (pLen > maxOffset) {
+    P *= maxOffset / pLen;
+  }
+  P *= angleFade;
   let deltaTexCoords = P / numLayers;
   
   // Initial values
@@ -139,7 +162,11 @@ fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
   var currentDepthMapValue = sampleHeight(currentTexCoords);
   
   // Steep parallax mapping loop
-  for (var i = 0; i < 32; i = i + 1) {
+  for (var i = 0; i < 64; i = i + 1) {
+    // Honor dynamic layer count while keeping a fixed max loop for WGSL.
+    if (f32(i) >= numLayers) {
+      break;
+    }
     if (currentLayerDepth >= currentDepthMapValue) {
       break;
     }
@@ -153,13 +180,50 @@ fn parallaxMapping(uv: vec2f, viewDir: vec3f, TBN: mat3x3f) -> vec2f {
   }
   
   // Parallax occlusion mapping - interpolation between layers
-  let prevTexCoords = currentTexCoords + deltaTexCoords;
-  
-  let afterDepth = currentDepthMapValue - currentLayerDepth;
-  let beforeDepth = sampleHeight(prevTexCoords) - currentLayerDepth + layerDepth;
-  
-  let weight = afterDepth / (afterDepth - beforeDepth);
-  let finalTexCoords = prevTexCoords * weight + currentTexCoords * (1.0 - weight);
+  // Bracketed segment:
+  // - `currentTexCoords` at `currentLayerDepth` (just passed the height)
+  // - `prevTexCoords` at `prevLayerDepth` (just before passing the height)
+  var prevTexCoords = currentTexCoords + deltaTexCoords;
+  var prevLayerDepth = currentLayerDepth - layerDepth;
+
+  // Binary search refinement (fixed small step count for quality)
+  // This reduces swimming and improves silhouette detail at similar cost.
+  let refineSteps = select(3, 4, numLayers > 28.0);
+  var aUV = prevTexCoords;
+  var bUV = currentTexCoords;
+  var aDepth = prevLayerDepth;
+  var bDepth = currentLayerDepth;
+
+  for (var j = 0; j < 4; j = j + 1) {
+    if (j >= refineSteps) {
+      break;
+    }
+
+    let midUV = (aUV + bUV) * 0.5;
+    let midDepth = (aDepth + bDepth) * 0.5;
+    let heightMid = sampleHeight(midUV);
+
+    // If we're still "above" the surface (ray depth < height), move deeper.
+    if (midDepth < heightMid) {
+      aUV = midUV;
+      aDepth = midDepth;
+    } else {
+      bUV = midUV;
+      bDepth = midDepth;
+    }
+  }
+
+  // Final interpolation within refined bracket
+  let heightA = sampleHeight(aUV);
+  let heightB = sampleHeight(bUV);
+  let afterDepth = heightB - bDepth;
+  let beforeDepth = heightA - aDepth;
+
+  // Robust interpolation (avoid NaNs when depths are equal)
+  let denom = afterDepth - beforeDepth;
+  let weightUnclamped = select(afterDepth / denom, 0.5, abs(denom) < 1e-5);
+  let weight = clamp(weightUnclamped, 0.0, 1.0);
+  let finalTexCoords = aUV * weight + bUV * (1.0 - weight);
   
   return finalTexCoords;
 }
@@ -183,7 +247,9 @@ fn generateNormalFromDepth(uv: vec2f, texelSize: vec2f) -> vec3f {
   let dy = (d02 + 2.0 * d12 + d22) - (d00 + 2.0 * d10 + d20);
   
   // Create normal (x, y components from gradients, z pointing up)
-  return normalize(vec3f(-dx * uniforms.materialParams.y, -dy * uniforms.materialParams.y, 1.0));
+  // Include parallax depth scale to keep generated normals consistent with displacement magnitude.
+  let slopeScale = uniforms.materialParams.x * uniforms.materialParams.y;
+  return normalize(vec3f(-dx * slopeScale, -dy * slopeScale, 1.0));
 }
 
 @fragment
@@ -198,23 +264,45 @@ fn main(input: FragmentInput) -> @location(0) vec4f {
   let TBN = mat3x3f(T, B, N);
   
   // Apply parallax mapping
-  let parallaxUV = parallaxMapping(input.uv, input.viewDir, TBN);
-  
-  // Discard fragments outside texture bounds (parallax edge fix)
-  if (parallaxUV.x < 0.0 || parallaxUV.x > 1.0 || parallaxUV.y < 0.0 || parallaxUV.y > 1.0) {
-    discard;
-  }
-  
+  let parallaxUVRaw = parallaxMapping(input.uv, input.viewDir, TBN);
+
+  // Edge handling: fade parallax near borders and clamp UV to avoid hard discard holes.
+  let edge = min(min(input.uv.x, 1.0 - input.uv.x), min(input.uv.y, 1.0 - input.uv.y));
+  let parallaxFade = smoothstep(0.0, 0.05, edge);
+  let parallaxUV = mix(input.uv, clamp(parallaxUVRaw, vec2f(0.0), vec2f(1.0)), parallaxFade);
+
+  // Use gradients for better mip selection after UV displacement.
+  let uvDx = dpdx(parallaxUV);
+  let uvDy = dpdy(parallaxUV);
+
   // Sample albedo texture with parallax-adjusted UV
-  let albedo = textureSample(albedoTexture, textureSampler, parallaxUV).rgb;
+  var albedo = textureSampleGrad(albedoTexture, textureSampler, parallaxUV, uvDx, uvDy).rgb;
+
+  // Cheap inner shadow (self-occlusion): darken cavities using the height map.
+  // Applied to albedo only so it mainly affects ambient + diffuse (not specular).
+  let flags = getParallaxFlags();
+  if ((flags & PARALLAX_FLAG_SELF_SHADOW) != 0u) {
+    let strength = getSelfShadowStrength();
+    // View direction in tangent space (grazing angles enhance occlusion)
+    let Vt = normalize(transpose(TBN) * input.viewDir);
+    let grazing = 1.0 - clamp(abs(Vt.z), 0.0, 1.0);
+    let h = sampleHeight(parallaxUV);
+    let cavity = clamp(1.0 - h, 0.0, 1.0);
+    let occlusion = 1.0 - cavity * strength * (0.25 + 0.75 * grazing);
+    albedo *= clamp(occlusion, 0.0, 1.0);
+  }
   
   // Get normal from normal map or generate from depth
   var normalTangent: vec3f;
   if (u32(uniforms.materialParams.z) != 0u) {
     // Sample normal map and convert from [0,1] to [-1,1]
-    let normalMapSample = textureSample(normalTexture, textureSampler, parallaxUV).rgb;
+    let normalMapSample = textureSampleGrad(normalTexture, textureSampler, parallaxUV, uvDx, uvDy).rgb;
     normalTangent = normalize(normalMapSample * 2.0 - 1.0);
-    normalTangent = vec3f(normalTangent.x * uniforms.materialParams.y, normalTangent.y * uniforms.materialParams.y, normalTangent.z);
+    normalTangent = normalize(vec3f(
+      normalTangent.x * uniforms.materialParams.y,
+      normalTangent.y * uniforms.materialParams.y,
+      normalTangent.z
+    ));
   } else {
     let flags = getParallaxFlags();
     if ((flags & PARALLAX_FLAG_GENERATE_NORMAL_FROM_DEPTH) != 0u) {
