@@ -109,4 +109,38 @@ export class Object3D {
       child.traverse(callback);
     }
   }
+
+  /**
+   * Recursively disposes this object and all children in the hierarchy.
+   * Calls dispose() on objects that have it (Scene, Mesh with materials, etc.).
+   *
+   * Override in subclasses to clean up additional resources.
+   * After calling this, the object hierarchy should not be reused.
+   *
+   * @example
+   * ```ts
+   * // Cleanup entire scene graph
+   * scene.disposeHierarchy();
+   *
+   * // Cleanup a branch of the scene
+   * parentNode.disposeHierarchy();
+   * ```
+   */
+  disposeHierarchy(): void {
+    // Dispose children first (depth-first)
+    for (const child of this.children) {
+      child.disposeHierarchy();
+    }
+
+    // Dispose self if the method exists
+    if ("dispose" in this && typeof (this as any).dispose === "function") {
+      (this as any).dispose();
+    }
+
+    // Clear parent/child relationships
+    this.children.length = 0;
+    if (this.parent) {
+      this.parent.remove(this);
+    }
+  }
 }

@@ -104,11 +104,10 @@ export class Scene extends Object3D {
   }
 
   private _cleanupSkyboxMaterial(): void {
-    // Currently SkyboxMaterial doesn't hold GPU resources directly
-    // (bind groups are cached in Renderer), but we clear the reference
-    // to allow garbage collection and future-proof for when materials
-    // might own GPU resources.
-    this._skyboxMaterial = undefined;
+    if (this._skyboxMaterial) {
+      this._skyboxMaterial.dispose();
+      this._skyboxMaterial = undefined;
+    }
   }
 
   /**
